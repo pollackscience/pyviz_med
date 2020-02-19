@@ -48,5 +48,5 @@ Thumbs.db
 **/plots
 
 # Data Files #
-**/data
-!data/README.md
+data/*
+!/data/README.md
