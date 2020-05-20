@@ -13,6 +13,75 @@ from holoviews.operation.datashader import datashade, shade, dynspread, rasteriz
 hv.extension('bokeh')
 
 
+class MedImage:
+    """Class for holding a medical image."""
+
+    def __init__(self, path, img_type='infer', *args, **kwargs):
+        '''Initialize via reading the image and creating the xarray.'''
+        self.read_image(path, img_type)
+
+        self.subject = kwargs.get('subject', 'Unnamed')
+        self.modality = kwargs.get('modality', 'Unknown')
+
+        print(self.img_np.shape)
+        self.ds = xr.Dataset({'image': (['subject', 'modality', 'z', 'y', 'x'],
+                                        self.img_np[np.newaxis, np.newaxis, :])
+                              },
+
+                             coords={'subject': [self.subject],
+                                     'modality': [self.modality],
+                                     'z': range(self.img_np.shape[0]),
+                                     'y': range(self.img_np.shape[1]),
+                                     'x': range(self.img_np.shape[2])
+                                    }
+                             )
+
+
+    def read_image(self, path, img_type):
+        '''Read image from path, and store image object'''
+        # Clean args
+        path = Path(path)
+        img_type = img_type.lower()
+
+        if img_type == 'infer':
+            if '.dcm' in str(path):
+                img_type = 'dicom'
+            elif '.nii' in str(path):
+                img_type = 'nifti'
+        elif img_type not in ['dicom', 'nifti']:
+            raise IOError('Cannot infer image type, please specify "img_type"')
+
+        if img_type == 'nifti':
+            reader = sitk.ImageFileReader()
+            reader.SetFileName(str(path))
+            image = reader.Execute()
+            print('direction', image.GetDirection())
+            print('origin', image.GetOrigin())
+            print('spacing', image.GetSpacing())
+
+        elif img_type == 'dicom':
+            reader = sitk.ImageSeriesReader()
+            print(str(path))
+            dicom_names = reader.GetGDCMSeriesFileNames(str(path)[:-5])
+            print(dicom_names)
+            dicom_names = sorted(dicom_names, key=lambda a: Path(a).stem[2:].zfill(3))
+            reader.SetFileNames(dicom_names)
+            reader.MetaDataDictionaryArrayUpdateOn()  # Get DICOM Info
+            reader.LoadPrivateTagsOn()  # Get DICOM Info
+            image = reader.Execute()
+            print('direction', image.GetDirection())
+            print('origin', image.GetOrigin())
+            print('spacing', image.GetSpacing())
+
+        self.img_np = sitk.GetArrayFromImage(image)
+
+
+    def view(self):
+        hv_ds = hv.Dataset(self.ds)
+        return hv_ds.to(hv.Image, ['x', 'y'], groupby='z', dynamic=True)
+
+
+
 def patient_series_viewer(path, patient, img_type='DICOM', info=''):
     '''Similar to pybreast viewer, but must natively handle a mix of 2d, 3d, scalar, and vector'''
 
