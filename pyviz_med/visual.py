@@ -13,48 +13,48 @@ from holoviews.operation.datashader import datashade, shade, dynspread, rasteriz
 hv.extension('bokeh')
 
 
-class MedImage:
-    """Class for holding a medical image."""
+class PyPatient:
+    """Class for holding image and metadata for a patient."""
 
-    def __init__(self, path, img_type='infer', *args, **kwargs):
+    def __init__(self, path, img_type='infer', overlay_path=None, *args, **kwargs):
         '''Initialize via reading the image and creating the xarray.'''
-        np_img_list = []
-        if type(path) is list:
-            n_mod = len(path)
-            for p in path:
-                np_img_list.append(self.read_image(p, img_type))
+
+        np_img_list = self.get_img_list(path)
+        np_overlay_list = self.get_img_list(overlay_path)
+
+        self.n_img = len(np_img_list)
+        self.n_overlay = len(np_overlay_list) if np_overlay_list else 0
+
+        np_img_stack, np_overlay_stack = self.pad_and_stack_images(np_img_list, np_overlay_list)
+
+        self.subject_id = kwargs.get('subject_id', 'no_id')
+        self.label = kwargs.get('label', [f'image_{n}' for n in range(self.n_img)])
+        if np_overlay_list is None:
+            self.ds = xr.Dataset({'image': (['subject_id', 'label', 'z', 'y', 'x'],
+                                            np_img_stack[np.newaxis, :])
+                                 },
+                                 coords={'subject_id': [self.subject_id],
+                                         'label': self.label,
+                                         'z': range(np_img_stack.shape[1]),
+                                         'y': range(np_img_stack.shape[2])[::-1],
+                                         'x': range(np_img_stack.shape[3])
+                                        }
+                                 )
         else:
-            n_mod = 1
-            np_img_list = [self.read_image(path, img_type)]
-
-        max_z = max_y = max_x = 0
-        for img in np_img_list:
-            max_z = max(img.shape[0], max_z)
-            max_y = max(img.shape[1], max_y)
-            max_x = max(img.shape[2], max_x)
-        pad = np.zeros((max_z, max_y, max_x))
-        print(pad.shape)
-        for i,img in enumerate(np_img_list):
-            pad_copy = pad.copy()
-            pad_copy[:img.shape[0], :img.shape[1], :img.shape[2]]=img
-            np_img_list[i] = pad_copy
-
-        np_img_list = np.stack(np_img_list, axis=0)
-
-        self.subject = kwargs.get('subject', 'Unnamed')
-        self.modality = kwargs.get('modality', ['Unknown']*n_mod)
-
-        print(np_img_list.shape)
-        self.ds = xr.Dataset({'image': (['subject', 'modality', 'z', 'y', 'x'],
-                                        np_img_list[np.newaxis, :])
-                             },
-                             coords={'subject': [self.subject],
-                                     'modality': self.modality,
-                                     'z': range(np_img_list.shape[1]),
-                                     'y': range(np_img_list.shape[2])[::-1],
-                                     'x': range(np_img_list.shape[3])
-                                    }
-                             )
+            self.feature = kwargs.get('feature', [f'feature_{n}' for n in range(self.n_overlay)])
+            self.ds = xr.Dataset({'image': (['subject_id', 'label', 'z', 'y', 'x'],
+                                            np_img_stack[np.newaxis, :]),
+                                  'overlay': (['subject_id', 'feature', 'z', 'y', 'x'],
+                                              np_overlay_stack[np.newaxis, :])
+                                 },
+                                 coords={'name': [self.subject_id],
+                                         'label': self.label,
+                                         'feature': self.feature,
+                                         'z': range(np_img_stack.shape[1]),
+                                         'y': range(np_img_stack.shape[2])[::-1],
+                                         'x': range(np_img_stack.shape[3])
+                                        }
+                                 )
 
 
     def read_image(self, path, img_type):
@@ -96,36 +96,86 @@ class MedImage:
         return sitk.GetArrayFromImage(image)
 
 
-    def view(self, three_axis=False):
-        imopts = {'tools': ['hover', 'lasso_select'], 'width': 400, 'height': 400, 'cmap': 'gray'}
+    def get_img_list(self, path):
+        if path is None:
+            return None
+
+        np_img_list = []
+        if type(path) is list:
+            for p in path:
+                np_img_list.append(self.read_image(p[0], p[1]))
+        else:
+            np_img_list = [self.read_image(path[0], path[1])]
+
+        return np_img_list
+
+
+    def pad_and_stack_images(self, img_list, overlay_list=None):
+        max_z = max_y = max_x = 0
+
+        total_list = img_list
+        if overlay_list is not None:
+            total_list += overlay_list
+
+        for img in total_list:
+            max_z = max(img.shape[0], max_z)
+            max_y = max(img.shape[1], max_y)
+            max_x = max(img.shape[2], max_x)
+        pad = np.zeros((max_z, max_y, max_x))
+
+        for i,img in enumerate(img_list):
+            pad_copy = pad.copy()
+            pad_copy[:img.shape[0], :img.shape[1], :img.shape[2]]=img
+            img_list[i] = pad_copy
+
+        img_list = np.stack(img_list, axis=0)
+
+        if overlay_list is not None:
+            for i,overlay in enumerate(overlay_list):
+                pad_copy = pad.copy()
+                pad_copy[:overlay.shape[0], :overlay.shape[1], :overlay.shape[2]]=overlay
+                overlay_list[i] = pad_copy
+
+            overlay_list = np.stack(overlay_list, axis=0)
+
+        return img_list, overlay_list
+
+
+    def view(self, three_axis=False, default_size=300):
+        # imopts = {'tools': ['hover'], 'width': 400, 'height': 400, 'cmap': 'gray'}
+        imopts = {'tools': ['hover'], 'cmap': 'gray'}
         opts.defaults(
-            opts.GridSpace(shared_xaxis=True, shared_yaxis=True,
+            opts.GridSpace(shared_xaxis=False, shared_yaxis=False,
                            fontsize={'title': 16, 'labels': 16, 'xticks': 12,
                                      'yticks': 12},
-                           plot_size=300),
+                           ),
+            opts.Image(cmap='gray', tools=['hover'], xaxis=None,
+                       yaxis=None),
         )
         hv_ds = hv.Dataset(self.ds)
 
         cslider = pn.widgets.RangeSlider(start=-3000, end=3000, value=(-800, 800), name='contrast')
         if three_axis:
-            gridspace = hv.GridSpace(kdims=['plane', 'modality'], label=f'{self.subject}')
-            for mod in self.modality:
-                gridspace['axial', mod] = hv_ds.select(modality=mod).to(
+            squish_height = int(max(default_size*(len(self.ds.z)/len(self.ds.x)), default_size/2))
+            gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
+            for mod in self.label:
+                gridspace['axial', mod] = hv_ds.select(label=mod).to(
                     hv.Image, ['x', 'y'], groupby=['z'],
-                    dynamic=True).opts(**imopts).apply.opts(clim=cslider.param.value)
-                gridspace['coronal', mod] = hv_ds.select(modality=mod).to(
+                    dynamic=True).opts(frame_width=default_size, frame_height=default_size).apply.opts(clim=cslider.param.value)
+                gridspace['coronal', mod] = hv_ds.select(label=mod).to(
                     hv.Image, ['x', 'z'], groupby=['y'],
-                    dynamic=True).opts(**imopts).apply.opts(clim=cslider.param.value)
-                gridspace['sagittal', mod] = hv_ds.select(modality=mod).to(
+                    dynamic=True).opts(frame_width=default_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
+                gridspace['sagittal', mod] = hv_ds.select(label=mod).to(
                     hv.Image, ['y', 'z'], groupby=['x'],
-                    dynamic=True).opts(**imopts).apply.opts(clim=cslider.param.value)
+                    dynamic=True).opts(frame_width=default_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
 
         else:
-            gridspace = hv.GridSpace(kdims=['modality'], label=f'self.subject')
-            for mod in self.modality:
-                gridspace[mod] = hv_ds.select(modality=mod).to(
+            squish_height = int(max(default_size*(len(self.ds.z)/len(self.ds.x)), default_size/2))
+            gridspace = hv.GridSpace(kdims=['label'], label=f'{self.subject_id}')
+            for mod in self.label:
+                gridspace[mod] = hv_ds.select(label=mod).to(
                     hv.Image, ['x', 'y'], groupby=['z'],
-                    dynamic=True).opts(**imopts).apply.opts(clim=cslider.param.value)
+                    dynamic=True).opts(frame_width=default_size, frame_height=default_size).apply.opts(clim=cslider.param.value)
 
         # hv_image = hv_ds.to(hv.Image, ['x', 'y'], groupby=['z', 'modality'], dynamic=True,
         #                     label=f'subject={self.subject}', group=f'modality={self.modality}').opts(**imopts)
