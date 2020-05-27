@@ -10,6 +10,7 @@ import panel as pn
 import holoviews as hv
 from holoviews import opts
 from holoviews.operation.datashader import datashade, shade, dynspread, rasterize
+from bokeh.models import FuncTickFormatter
 
 hv.extension('bokeh')
 
@@ -17,7 +18,7 @@ hv.extension('bokeh')
 class PyPatient:
     """Class for holding image and metadata for a patient."""
 
-    def __init__(self, path, img_type='infer', overlay_path=None, *args, **kwargs):
+    def __init__(self, path, img_type='infer', overlay_path=None, from_xarray=False, *args, **kwargs):
         '''Initialize via reading the image and creating the xarray.'''
 
         np_img_list, img_metadata = self.get_img_list(path)
@@ -30,8 +31,6 @@ class PyPatient:
 
         self.n_img = np_img_stack.shape[0]
         self.n_overlay = np_overlay_stack.shape[1] if np_overlay_stack is not None else 0
-        print('n_overlay', self.n_overlay)
-        print('overlay', np_overlay_stack.shape)
 
         self.subject_id = kwargs.get('subject_id', 'no_id')
         self.label = kwargs.get('label', [f'image_{n}' for n in range(self.n_img)])
@@ -125,6 +124,8 @@ class PyPatient:
             origin = image.GetOrigin()
             spacing = image.GetSpacing()
             image = sitk.GetArrayFromImage(image)
+            if len(image.shape) == 4:
+                image = image[0:1, :]
 
         elif img_type == 'dicom':
             reader = sitk.ImageSeriesReader()
@@ -191,7 +192,6 @@ class PyPatient:
     def pad_and_stack_images(self, img_list, overlay_list=None):
         max_z = max_y = max_x = 0
 
-
         for img in img_list:
             max_z = max(img.shape[-3], max_z)
             max_y = max(img.shape[-2], max_y)
@@ -251,18 +251,18 @@ class PyPatient:
                 for j in i:
                     if len(j.shape) == 3:
                         sub_features += 1
-                    elif len(j.shape == 4):
+                    elif len(j.shape) == 4:
                         sub_features += j.shape[0]
             else:
                 if len(i.shape) == 3:
                     sub_features += 1
-                elif len(i.shape == 4):
+                elif len(i.shaper) == 4:
                     sub_features += j.shape[0]
             total_features = max(total_features, sub_features)
 
         return total_features
 
-    def view(self, three_axis=False, default_size=300):
+    def view(self, plane='axial', three_planes=False, image_size=300, dynamic=True):
         # imopts = {'tools': ['hover'], 'width': 400, 'height': 400, 'cmap': 'gray'}
         imopts = {'tools': ['hover'], 'cmap': 'gray'}
         opts.defaults(
@@ -275,6 +275,206 @@ class PyPatient:
             opts.Overlay(tools=['hover']),
             opts.NdOverlay(tools=['hover']),
         )
+
+        if plane=='axial':
+            a1, a2, a3 = 'x', 'y', 'z'
+        elif plane=='coronal':
+            a1, a2, a3 = 'x', 'z', 'y'
+        elif plane=='sagittal':
+            a1, a2, a3 = 'y', 'z', 'x'
+
+        cslider = pn.widgets.RangeSlider(start=-3000, end=3000, value=(-800, 800), name='contrast')
+        if 'overlay' in self.ds.data_vars:
+            hv_ds_image = hv.Dataset(self.ds['image'])
+            print(hv_ds_image)
+            hv_ds_overlay = hv.Dataset(self.ds['overlay'])
+            tooltips = [
+                ('x', '@x'),
+                ('y', '@y'),
+                ('z', '@z'),
+                ('image', '@image'),
+                ('overlay', '@overlay')
+            ]
+            hover = HoverTool(tooltips=tooltips)
+            overlay_max = self.ds.overlay.max()
+            alpha_slider = pn.widgets.FloatSlider(start=0, end=1, value=0.7, name='overlay transparency')
+            cmap_select = pn.widgets.Select(name='Overlay Colormap', options=['Discrete',
+                                                                              'Continuous'])
+
+            max_thresholds = sorted(list(set([self.ds.overlay.sel(feature=i).values.max() for i in
+                                   self.ds.feature])))
+            min_thresholds = sorted(list(set([self.ds.overlay.sel(feature=i).values.min()+1e-6 for i in
+                                   self.ds.feature])))
+            ocslider = pn.widgets.DiscreteSlider(name='overlay max threshold', options=max_thresholds,
+                                                value=max_thresholds[-1])
+            if len(min_thresholds) == 1 and len(max_thresholds) == 1:
+                thresh_toggle=0
+                def oclim():
+                    return (min_thresholds[0], max_thresholds[0])
+
+            elif len(min_thresholds) > 1 and len(max_thresholds) == 1:
+                thresh_toggle=1
+                ocslider_min = pn.widgets.DiscreteSlider(name='overlay min threshold',
+                                                     options=min_thresholds,
+                                                     value=min_thresholds[-1])
+                @pn.depends(ocslider_min)
+                def oclim(value):
+                    return (value, max_thresholds[0])
+
+            elif len(min_thresholds) == 1 and len(max_thresholds) > 1:
+                thresh_toggle=2
+                ocslider_max = pn.widgets.DiscreteSlider(name='overlay max threshold',
+                                                     options=max_thresholds,
+                                                     value=max_thresholds[-1])
+                @pn.depends(ocslider_max)
+                def oclim(value):
+                    return (min_thresholds[0], value)
+
+            else:
+                thresh_toggle=3
+                ocslider_min = pn.widgets.DiscreteSlider(name='overlay min threshold',
+                                                     options=min_thresholds,
+                                                     value=min_thresholds[-1])
+                ocslider_max = pn.widgets.DiscreteSlider(name='overlay max threshold',
+                                                     options=max_thresholds,
+                                                     value=max_thresholds[-1])
+                @pn.depends(ocslider_min, ocslider_max)
+                def oclim(value_min, value_max):
+                    return (value_min, value_max)
+
+            @pn.depends(cmap_select)
+            def cmap_dict(value):
+                d = {'Discrete': 'glasbey_hv','Continuous': 'viridis'}
+                return d[value]
+
+
+            if three_planes:
+                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
+                for mod in self.label:
+                    gridspace['axial', mod] = hv_ds_image.select(label=mod).to(
+                        hv.Image, ['x', 'y'], groupby=['z'], vdims='image',
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=image_size).apply.opts(clim=cslider.param.value)
+                    gridspace['coronal', mod] = hv_ds_image.select(label=mod).to(
+                        hv.Image, ['x', 'z'], groupby=['y'], vdims='image',
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
+                    gridspace['sagittal', mod] = hv_ds_image.select(label=mod).to(
+                        hv.Image, ['y', 'z'], groupby=['x'], vdims='image',
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
+
+                    gridspace['axial', mod] *= hv_ds_overlay.select(label=mod).to(
+                        hv.Image, ['x', 'y'], groupby=['z', 'feature'], vdims='overlay',
+                        dynamic=dynamic).opts(
+                            cmap='glasbey_hv', clipping_colors={'min': 'transparent'},
+                        ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
+                            alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+                    gridspace['coronal', mod] *= hv_ds_overlay.select(label=mod).to(
+                        hv.Image, ['x', 'z'], groupby=['y', 'feature'], vdims='overlay',
+                        dynamic=dynamic).opts(
+                            cmap='glasbey_hv', clipping_colors={'min': 'transparent'},
+                        ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
+                            alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+                    gridspace['sagittal', mod] *= hv_ds_overlay.select(label=mod).to(
+                        hv.Image, ['y', 'z'], groupby=['x', 'feature'], vdims='overlay',
+                        dynamic=dynamic).opts(
+                            cmap='glasbey_hv', clipping_colors={'min': 'transparent'},
+                        ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
+                            alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+
+            else:
+                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                gridspace = hv.GridSpace(kdims=['label'], label=f'{self.subject_id}')
+                for mod in self.label:
+                    gridspace[mod] = hv_ds_image.select(label=mod).to(
+                        hv.Image, [a1, a2], groupby=[a3], vdims='image',
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=image_size,
+                                           ).apply.opts(clim=cslider.param.value)
+                    gridspace[mod] *= hv_ds_overlay.select(label=mod).to(
+                        hv.Image, [a1, a2], groupby=[a3, 'feature'], vdims='overlay',
+                        dynamic=dynamic).opts(
+                            cmap='glasbey_hv', clipping_colors={'min': 'transparent'},
+                        ).redim.range(overlay=(1e-6, overlay_max)).apply.opts(
+                            alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+                    gridspace[mod] = gridspace[mod].opts(tools=['hover'])
+                    print(gridspace[mod])
+        else:
+            hv_ds = hv.Dataset(self.ds['image'])
+            if three_panes:
+                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
+                for mod in self.label:
+                    gridspace['axial', mod] = hv_ds.select(label=mod).to(
+                        hv.Image, ['x', 'y'], groupby=['z'], vdims='image',
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=image_size).apply.opts(clim=cslider.param.value)
+                    gridspace['coronal', mod] = hv_ds.select(label=mod).to(
+                        hv.Image, ['x', 'z'], groupby=['y'], vdims='image',
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
+                    gridspace['sagittal', mod] = hv_ds.select(label=mod).to(
+                        hv.Image, ['y', 'z'], groupby=['x'], vdims='image',
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
+
+            else:
+                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                gridspace = hv.GridSpace(kdims=['label'], label=f'{self.subject_id}')
+                for mod in self.label:
+                    gridspace[mod] = hv_ds.select(label=mod).to(
+                        hv.Image, [a1, a2], groupby=[a3], vdims='image',
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=image_size).apply.opts(clim=cslider.param.value)
+
+        pn_layout = pn.pane.HoloViews(gridspace)
+        wb = pn_layout.widget_box
+        wb.append(cslider)
+        if 'overlay' in self.ds.data_vars:
+            wb.append(alpha_slider)
+            wb.append(cmap_select)
+            if thresh_toggle in [2, 3]:
+                wb.append(ocslider_max)
+            if thresh_toggle in [1, 3]:
+                wb.append(ocslider_min)
+        return pn.Row(wb, pn_layout)
+
+
+class PyCohort:
+    """Class for veiwing image and metadata for a cohort of patients."""
+
+    def __init__(self, path):
+        '''Initialize via reading the image and creating the xarray.'''
+        self.ds = self.load_files(path)
+
+
+    def load_files(self, file_names):
+        if type(file_names) is not list:
+            file_names = str(file_names)
+        else:
+            file_names = [f for f in file_names if Path(f).exists()]
+
+        if '*' in file_names or type(file_names) is list:
+            ds = xr.open_mfdataset(file_names, combine='nested', concat_dim='subject_id')
+        else:
+            ds = xr.open_dataset(file_names)
+        return ds
+
+
+    def view(self, plane='axial', three_planes=False, image_size=300, dynamic=True):
+        # imopts = {'tools': ['hover'], 'width': 400, 'height': 400, 'cmap': 'gray'}
+        imopts = {'tools': ['hover'], 'cmap': 'gray'}
+        opts.defaults(
+            opts.GridSpace(shared_xaxis=False, shared_yaxis=False,
+                           fontsize={'title': 16, 'labels': 16, 'xticks': 12,
+                                     'yticks': 12},
+                           ),
+            opts.Image(cmap='gray', tools=['hover'], xaxis=None,
+                       yaxis=None),
+            opts.Overlay(tools=['hover']),
+            opts.NdOverlay(tools=['hover']),
+        )
+
+        if plane=='axial':
+            a1, a2, a3 = 'x', 'y', 'z'
+        elif plane=='coronal':
+            a1, a2, a3 = 'x', 'z', 'y'
+        elif plane=='sagittal':
+            a1, a2, a3 = 'y', 'z', 'x'
 
         cslider = pn.widgets.RangeSlider(start=-3000, end=3000, value=(-800, 800), name='contrast')
         if 'overlay' in self.ds.data_vars:
@@ -290,83 +490,141 @@ class PyPatient:
             hover = HoverTool(tooltips=tooltips)
             overlay_max = self.ds.overlay.max()
             alpha_slider = pn.widgets.FloatSlider(start=0, end=1, value=0.7, name='overlay transparency')
+            cmap_select = pn.widgets.Select(name='Overlay Colormap', options=['Discrete',
+                                                                              'Continuous'])
 
-            if three_axis:
-                squish_height = int(max(default_size*(len(self.ds.z)/len(self.ds.x)), default_size/2))
-                gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
-                for mod in self.label:
+            print('thresh_subj')
+            max_thresholds = [1,10,600,1500]
+
+            print('max')
+            min_thresholds = [1e-6]
+            print('min')
+            ocslider = pn.widgets.DiscreteSlider(name='overlay max threshold', options=max_thresholds,
+                                                value=max_thresholds[-1])
+            if len(min_thresholds) == 1 and len(max_thresholds) == 1:
+                thresh_toggle=0
+                def oclim():
+                    return (min_thresholds[0], max_thresholds[0])
+
+            elif len(min_thresholds) > 1 and len(max_thresholds) == 1:
+                thresh_toggle=1
+                ocslider_min = pn.widgets.DiscreteSlider(name='overlay min threshold',
+                                                     options=min_thresholds,
+                                                     value=min_thresholds[-1])
+                @pn.depends(ocslider_min)
+                def oclim(value):
+                    return (value, max_thresholds[0])
+
+            elif len(min_thresholds) == 1 and len(max_thresholds) > 1:
+                thresh_toggle=2
+                ocslider_max = pn.widgets.DiscreteSlider(name='overlay max threshold',
+                                                     options=max_thresholds,
+                                                     value=max_thresholds[-1])
+                @pn.depends(ocslider_max)
+                def oclim(value):
+                    return (min_thresholds[0], value)
+
+            else:
+                thresh_toggle=3
+                ocslider_min = pn.widgets.DiscreteSlider(name='overlay min threshold',
+                                                     options=min_thresholds,
+                                                     value=min_thresholds[-1])
+                ocslider_max = pn.widgets.DiscreteSlider(name='overlay max threshold',
+                                                     options=max_thresholds,
+                                                     value=max_thresholds[-1])
+                @pn.depends(ocslider_min, ocslider_max)
+                def oclim(value_min, value_max):
+                    return (value_min, value_max)
+
+            @pn.depends(cmap_select)
+            def cmap_dict(value):
+                d = {'Discrete': 'glasbey_hv','Continuous': 'viridis'}
+                return d[value]
+
+
+            if three_planes:
+                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                gridspace = hv.GridSpace(kdims=['plane', 'label'])
+                for mod in self.ds.label:
                     gridspace['axial', mod] = hv_ds_image.select(label=mod).to(
                         hv.Image, ['x', 'y'], groupby=['z'], vdims='image',
-                        dynamic=True).opts(frame_width=default_size, frame_height=default_size).apply.opts(clim=cslider.param.value)
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=image_size).apply.opts(clim=cslider.param.value)
                     gridspace['coronal', mod] = hv_ds_image.select(label=mod).to(
                         hv.Image, ['x', 'z'], groupby=['y'], vdims='image',
-                        dynamic=True).opts(frame_width=default_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
                     gridspace['sagittal', mod] = hv_ds_image.select(label=mod).to(
                         hv.Image, ['y', 'z'], groupby=['x'], vdims='image',
-                        dynamic=True).opts(frame_width=default_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
 
                     gridspace['axial', mod] *= hv_ds_overlay.select(label=mod).to(
                         hv.Image, ['x', 'y'], groupby=['z', 'feature'], vdims='overlay',
-                        dynamic=True).opts(
+                        dynamic=dynamic).opts(
                             cmap='glasbey_hv', clipping_colors={'min': 'transparent'},
                         ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
-                            alpha=alpha_slider.param.value)
+                            alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
                     gridspace['coronal', mod] *= hv_ds_overlay.select(label=mod).to(
                         hv.Image, ['x', 'z'], groupby=['y', 'feature'], vdims='overlay',
-                        dynamic=True).opts(
+                        dynamic=dynamic).opts(
                             cmap='glasbey_hv', clipping_colors={'min': 'transparent'},
                         ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
-                            alpha=alpha_slider.param.value)
+                            alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
                     gridspace['sagittal', mod] *= hv_ds_overlay.select(label=mod).to(
                         hv.Image, ['y', 'z'], groupby=['x', 'feature'], vdims='overlay',
-                        dynamic=True).opts(
+                        dynamic=dynamic).opts(
                             cmap='glasbey_hv', clipping_colors={'min': 'transparent'},
                         ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
-                            alpha=alpha_slider.param.value)
+                            alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
 
             else:
-                squish_height = int(max(default_size*(len(self.ds.z)/len(self.ds.x)), default_size/2))
-                gridspace = hv.GridSpace(kdims=['label'], label=f'{self.subject_id}')
-                for mod in self.label:
-                    gridspace[mod] = hv_ds_image.select(label=mod).to(
-                        hv.Image, ['x', 'y'], groupby=['z'], vdims='image',
-                        dynamic=True).opts(frame_width=default_size, frame_height=default_size,
-                                           ).apply.opts(clim=cslider.param.value)
-                    gridspace[mod] *= hv_ds_overlay.select(label=mod).to(
-                        hv.Image, ['x', 'y'], groupby=['z', 'feature'], vdims='overlay',
-                        dynamic=True).opts(
-                            cmap='glasbey_hv', clipping_colors={'min': 'transparent'},
-                        ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
-                            alpha=alpha_slider.param.value)
-                    gridspace[mod] = gridspace[mod].opts(tools=['hover'])
-                    print(gridspace[mod])
+                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                # gridspace = hv.GridSpace(kdims=['label'])
+                #for mod in self.ds.label:
+                hv_image = hv_ds_image.to(
+                    hv.Image, [a1, a2], vdims='image',
+                    dynamic=dynamic).opts(frame_width=image_size, frame_height=image_size,
+                                          ).apply.opts(clim=cslider.param.value)
+                hv_image *= hv_ds_overlay.to(
+                    hv.Image, [a1, a2], vdims='overlay',
+                    dynamic=dynamic).opts(
+                        cmap='glasbey_hv', clipping_colors={'min': 'transparent'},
+                    ).redim.range(overlay=(1e-6, overlay_max)).apply.opts(
+                        alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+                print(hv_image)
+                gridspace = hv_image.grid('label')
+                print(gridspace)
         else:
             hv_ds = hv.Dataset(self.ds['image'])
-            if three_axis:
-                squish_height = int(max(default_size*(len(self.ds.z)/len(self.ds.x)), default_size/2))
-                gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
-                for mod in self.label:
+            print(hv_ds)
+            if three_panes:
+                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                gridspace = hv.GridSpace(kdims=['plane', 'label'])
+                for mod in self.ds.label:
                     gridspace['axial', mod] = hv_ds.select(label=mod).to(
                         hv.Image, ['x', 'y'], groupby=['z'], vdims='image',
-                        dynamic=True).opts(frame_width=default_size, frame_height=default_size).apply.opts(clim=cslider.param.value)
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=image_size).apply.opts(clim=cslider.param.value)
                     gridspace['coronal', mod] = hv_ds.select(label=mod).to(
                         hv.Image, ['x', 'z'], groupby=['y'], vdims='image',
-                        dynamic=True).opts(frame_width=default_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
                     gridspace['sagittal', mod] = hv_ds.select(label=mod).to(
                         hv.Image, ['y', 'z'], groupby=['x'], vdims='image',
-                        dynamic=True).opts(frame_width=default_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=squish_height).apply.opts(clim=cslider.param.value)
 
             else:
-                squish_height = int(max(default_size*(len(self.ds.z)/len(self.ds.x)), default_size/2))
-                gridspace = hv.GridSpace(kdims=['label'], label=f'{self.subject_id}')
-                for mod in self.label:
+                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                gridspace = hv.GridSpace(kdims=['label'])
+                for mod in self.ds.label:
                     gridspace[mod] = hv_ds.select(label=mod).to(
-                        hv.Image, ['x', 'y'], groupby=['z'], vdims='image',
-                        dynamic=True).opts(frame_width=default_size, frame_height=default_size).apply.opts(clim=cslider.param.value)
+                        hv.Image, [a1, a2], groupby=[a3], vdims='image',
+                        dynamic=dynamic).opts(frame_width=image_size, frame_height=image_size).apply.opts(clim=cslider.param.value)
 
         pn_layout = pn.pane.HoloViews(gridspace)
         wb = pn_layout.widget_box
         wb.append(cslider)
         if 'overlay' in self.ds.data_vars:
             wb.append(alpha_slider)
+            wb.append(cmap_select)
+            if thresh_toggle in [2, 3]:
+                wb.append(ocslider_max)
+            if thresh_toggle in [1, 3]:
+                wb.append(ocslider_min)
         return pn.Row(wb, pn_layout)
