@@ -22,11 +22,17 @@ class PyPatient:
     def __init__(self, path, img_type='infer', overlay_path=None, from_xarray=False, *args, **kwargs):
         '''Initialize via reading the image and creating the xarray.'''
 
+        self.verbose = kwargs.get('verbose', True)
         np_img_list, img_metadata = self.get_img_list(path)
-        print(img_metadata)
+        if self.verbose:
+            print(img_metadata)
         np_overlay_list, _ = self.get_img_list(overlay_path)
+        if self.verbose:
+            print('shape pre orient', np_overlay_list[0][0].shape)
         self.orient_images(np_img_list, img_metadata)
         self.orient_images(np_overlay_list, img_metadata)
+        if self.verbose:
+            print('shape post orient', np_overlay_list[0][0].shape)
 
         np_img_stack, np_overlay_stack = self.pad_and_stack_images(np_img_list, np_overlay_list)
 
@@ -36,10 +42,11 @@ class PyPatient:
         self.subject_id = kwargs.get('subject_id', 'no_id')
         self.label = kwargs.get('label', [f'image_{n}' for n in range(self.n_img)])
         if np_overlay_list is None:
-            print(img_metadata)
-            print(img_metadata['spacing'])
-            print(img_metadata['origin'])
-            print(img_metadata['direction'])
+            if self.verbose:
+                print(img_metadata)
+                print(img_metadata['spacing'])
+                print(img_metadata['origin'])
+                print(img_metadata['direction'])
             self.ds = xr.Dataset({'image': (['subject_id', 'label', 'z', 'y', 'x'],
                                             np_img_stack[np.newaxis, :]),
                                   'spacing': (['subject_id', 'label', 'img_dims'],
@@ -76,22 +83,25 @@ class PyPatient:
                                         }
                                  )
     def orient_images(self, np_img_list, img_metadata):
-        print(img_metadata)
+        if self.verbose:
+            print(img_metadata)
         if np_img_list is None:
             return None
         for i in range(len(np_img_list)):
             if type(np_img_list[i]) is list:
                 for j in range(len(np_img_list[i])):
-                    print(img_metadata['direction'][i])
+                    if self.verbose:
+                        print(img_metadata['direction'][i])
                     if img_metadata['direction'][i][0] < 0:
-                        np_img_list[i] = np.flip(np_img_list[i][j], axis=2)
+                        np_img_list[i][j] = np.flip(np_img_list[i][j], axis=2)
                     if img_metadata['direction'][i][4] > 0:
-                        np_img_list[i] = np.flip(np_img_list[i][j], axis=1)
+                        np_img_list[i][j] = np.flip(np_img_list[i][j], axis=1)
                     if img_metadata['direction'][i][8] < 0:
-                        np_img_list[i] = np.flip(np_img_list[i][j], axis=0)
+                        np_img_list[i][j] = np.flip(np_img_list[i][j], axis=0)
 
             else:
-                print(img_metadata['direction'][i])
+                if self.verbose:
+                    print(img_metadata['direction'][i])
                 if img_metadata['direction'][i][0] < 0:
                     np_img_list[i] = np.flip(np_img_list[i], axis=2)
                 if img_metadata['direction'][i][4] > 0:
@@ -130,9 +140,11 @@ class PyPatient:
 
         elif img_type == 'dicom':
             reader = sitk.ImageSeriesReader()
-            print(str(path))
+            if self.verbose:
+                print(str(path))
             dicom_names = reader.GetGDCMSeriesFileNames(str(path))
-            print(dicom_names)
+            if self.verbose:
+                print(dicom_names)
             dicom_names = sorted(dicom_names, key=lambda a: Path(a).stem[2:].zfill(3))
             reader.SetFileNames(dicom_names)
             # reader.MetaDataDictionaryArrayUpdateOn()  # Get DICOM Info
@@ -170,6 +182,8 @@ class PyPatient:
                     np_img_list.append([])
                     for j in i:
                         img, meta_data = self.read_image(j[0], j[1])
+                        if self.verbose:
+                            print(img.shape)
                         np_img_list[-1].append(img)
                         # for key in meta_data.keys():
                         #     meta_data_lists[key].append(meta_data[key])
@@ -177,20 +191,25 @@ class PyPatient:
                     img, meta_data = self.read_image(i[0], i[1])
                     np_img_list.append(img)
                     for key in meta_data.keys():
-                        print(key)
-                        print(meta_data_lists[key])
+                        if self.verbose:
+                            print(key)
+                            print(meta_data_lists[key])
                         meta_data_lists[key].append(meta_data[key])
         else:
             img, meta_data = self.read_image(path[0], path[1])
             np_img_list.append(img)
             for key in meta_data.keys():
-                print(key)
+                if self.verbose:
+                    print(key)
                 meta_data_lists[key].append(meta_data[key])
 
         return np_img_list, meta_data_lists
 
 
     def pad_and_stack_images(self, img_list, overlay_list=None):
+        if self.verbose:
+            print(len(overlay_list))
+            print(overlay_list)
         max_z = max_y = max_x = 0
 
         for img in img_list:
@@ -199,7 +218,9 @@ class PyPatient:
             max_x = max(img.shape[-1], max_x)
         if overlay_list is not None:
             n_features = self.get_n_features(overlay_list)
-            print(n_features)
+            if self.verbose:
+                print('n_features', n_features)
+                print(overlay_list)
             for img in overlay_list:
                 if type(img) is list:
                     for subimg in img:
@@ -207,6 +228,8 @@ class PyPatient:
                         max_y = max(subimg.shape[-2], max_y)
                         max_x = max(subimg.shape[-1], max_x)
                 else:
+                    if self.verbose:
+                        print('img.shape', img.shape)
                     max_z = max(img.shape[-3], max_z)
                     max_y = max(img.shape[-2], max_y)
                     max_x = max(img.shape[-1], max_x)
@@ -257,7 +280,7 @@ class PyPatient:
             else:
                 if len(i.shape) == 3:
                     sub_features += 1
-                elif len(i.shaper) == 4:
+                elif len(i.shape) == 4:
                     sub_features += j.shape[0]
             total_features = max(total_features, sub_features)
 
@@ -287,9 +310,11 @@ class PyPatient:
         cslider = pn.widgets.RangeSlider(start=-3000, end=3000, value=(-800, 800), name='contrast')
         if 'overlay' in self.ds.data_vars:
             hv_ds_image = hv.Dataset(self.ds['image'])
-            print(hv_ds_image)
+            if self.verbose:
+                print(hv_ds_image)
             hv_ds_overlay = hv.Dataset(self.ds['overlay'])
-            print(hv_ds_overlay)
+            if self.verbose:
+                print(hv_ds_overlay)
             tooltips = [
                 ('x', '@x'),
                 ('y', '@y'),
@@ -298,20 +323,23 @@ class PyPatient:
                 ('overlay', '@overlay')
             ]
             hover = HoverTool(tooltips=tooltips)
-            print('overlay_max_calc')
+            if self.verbose:
+                print('overlay_max_calc')
             first_subj_max = self.ds.isel(subject_id=0).overlay.max(dim=['x', 'y', 'z',
                                                                          'label']).compute()
             first_subj_min = self.ds.isel(subject_id=0).overlay.min(dim=['x', 'y', 'z',
                                                                          'label']).compute()
-            print('overlay_max_calc ready')
-            print(first_subj_max)
+            if self.verbose:
+                print('overlay_max_calc ready')
+                print(first_subj_max)
             overlay_max = first_subj_max.max()
             alpha_slider = pn.widgets.FloatSlider(start=0, end=1, value=0.7, name='overlay transparency')
             cmap_select = pn.widgets.Select(name='Overlay Colormap', options=['Discrete',
                                                                               'Continuous'])
 
-            print('max thresh calc')
-            print(first_subj_max.max())
+            if self.verbose:
+                print('max thresh calc')
+                print(first_subj_max.max())
             max_thresholds = first_subj_max.values
             if max_thresholds.size != 1:
                 max_thresholds = sorted(set(max_thresholds))
@@ -319,7 +347,8 @@ class PyPatient:
                 max_thresholds = [np.asscalar(max_thresholds)]
             # max_thresholds = sorted(list(set([first_subj.overlay.sel(feature=i).values.max() for i in
             #                        first_subj.feature])))
-            print('min thresh calc')
+            if self.verbose:
+                print('min thresh calc')
             min_thresholds = first_subj_min.values+1e-6
             if min_thresholds.size != 1:
                 min_thresholds = sorted(set(min_thresholds))
@@ -364,7 +393,8 @@ class PyPatient:
                 def oclim(value_min, value_max):
                     return (value_min, value_max)
 
-            print(thresh_toggle)
+            if self.verbose:
+                print(thresh_toggle)
             @pn.depends(cmap_select)
             def cmap_dict(value):
                 d = {'Discrete': 'glasbey_hv','Continuous': 'viridis'}
@@ -410,7 +440,8 @@ class PyPatient:
             else:
                 squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['label'], label=f'{self.subject_id}')
-                print('init gridspace')
+                if self.verbose:
+                    print('init gridspace')
                 # gridspace = hv.GridSpace(kdims=['label'])
                 # for mod in self.ds.label:
                 #     gridspace[mod] = hv_ds_image.select(label=mod).to(
@@ -431,7 +462,8 @@ class PyPatient:
                     hv.Image, [a1, a2], vdims='image',
                     dynamic=dynamic).opts(frame_width=image_size, frame_height=image_size,
                                           ).apply.opts(clim=cslider.param.value)
-                print(gridspace)
+                if self.verbose:
+                    print(gridspace)
                 gridspace *= hv_ds_overlay.to(
                     hv.Image, [a1, a2], vdims='overlay',
                     dynamic=dynamic).opts(
@@ -445,7 +477,7 @@ class PyPatient:
 
         else:
             hv_ds = hv.Dataset(self.ds['image'])
-            if three_panes:
+            if three_planes:
                 squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
                 gridspace = hv.GridSpace(kdims=['plane', 'label'])
@@ -466,7 +498,7 @@ class PyPatient:
                 gridspace = hv.GridSpace(kdims=['label'])
                 for mod in self.label:
                     gridspace[mod] = hv_ds.select(label=mod).to(
-                        hv.Image, [a1, a2], groupby=[a3], vdims='image',
+                        hv.Image, [a1, a2], vdims='image',
                         dynamic=dynamic).opts(frame_width=image_size, frame_height=image_size).apply.opts(clim=cslider.param.value)
 
         pn_layout = pn.pane.HoloViews(gridspace)
