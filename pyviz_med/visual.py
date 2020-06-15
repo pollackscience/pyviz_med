@@ -23,6 +23,10 @@ class PyPatient:
         '''Initialize via reading the image and creating the xarray.'''
 
         self.verbose = kwargs.get('verbose', False)
+        if type(path) is dict:
+            self.label = list(path.keys())
+            path = [path[key] for key in self.label]
+
         np_img_list, img_metadata = self.get_img_list(path)
         if self.verbose:
             print(img_metadata, len(np_img_list))
@@ -36,7 +40,7 @@ class PyPatient:
         self.n_overlay = np_overlay_stack.shape[1] if np_overlay_stack is not None else 0
 
         self.subject_id = kwargs.get('subject_id', 'NO_ID')
-        self.label = kwargs.get('label', [f'image_{n}' for n in range(self.n_img)])
+        # self.label = kwargs.get('label', [f'image_{n}' for n in range(self.n_img)])
         if type(self.label) is not list:
             self.label = [self.label]
         if np_overlay_list is None:
@@ -112,24 +116,47 @@ class PyPatient:
                     np_img_list[i] = np.flip(np_img_list[i], axis=0)
 
 
+    def get_file_type(self, path):
+        '''Automatically determine file type based on path name.'''
+        pass
 
-    def read_image(self, path, img_type):
+    def parse_path(self, path):
+        '''Return list of files that match path specification.'''
+
+        path = Path(path)
+
+        if path.is_file():
+            return str(path)
+        elif path.is_dir():
+            return [str(p) for p in sorted(path.glob('*'))]
+        elif '*' in path.name:
+            return [str(p) for p in sorted(path.parents[0].glob(path.name))]
+        else:
+            raise ValueError('Cannot parse path: {path}')
+
+        return path
+
+    def read_image(self, path, img_type=None):
         '''Read image from path, and store image object'''
         # Clean args
         path = Path(path)
-        img_type = img_type.lower()
+        print(img_type)
+        if img_type is None:
+            path = self.parse_path(path)
+            print(path)
+        else:
+            img_type = img_type.lower()
 
-        if img_type == 'infer':
-            if '.dcm' in str(path):
-                img_type = 'dicom'
-            elif '.nii' in str(path):
-                img_type = 'nifti'
-            elif '.png' in str(path):
-                img_type = 'png'
-        elif img_type not in ['dicom', 'nifti', 'png']:
-            raise IOError('Cannot infer image type, please specify "img_type"')
+        if img_type is None:
+            image = sitk.ReadImage(path)
+            direction = image.GetDirection()
+            origin = image.GetOrigin()
+            spacing = image.GetSpacing()
+            image = sitk.GetArrayFromImage(image)
+            if len(image.shape) == 4:
+                image = image[0:1, :]
 
-        if img_type == 'nifti':
+        elif img_type == 'nifti':
             reader = sitk.ImageFileReader()
             reader.SetFileName(str(path))
             image = reader.Execute()
@@ -173,37 +200,31 @@ class PyPatient:
 
 
     def get_img_list(self, path, get_metadata=True):
+        '''Return a list of images in numpy format (and metadata, optional).'''
         if path is None:
             return None, None
 
         np_img_list = []
         meta_data_lists = {'direction':[], 'origin':[], 'spacing':[]}
-        if type(path) is list:
-            for i in path:
-                if type(i) is list:
-                    np_img_list.append([])
-                    for j in i:
-                        img, meta_data = self.read_image(j[0], j[1])
-                        if self.verbose:
-                            print(img.shape)
-                        np_img_list[-1].append(img)
-                        # for key in meta_data.keys():
-                        #     meta_data_lists[key].append(meta_data[key])
-                else:
-                    img, meta_data = self.read_image(i[0], i[1])
-                    np_img_list.append(img)
-                    for key in meta_data.keys():
-                        if self.verbose:
-                            print(key)
-                            print(meta_data_lists[key])
-                        meta_data_lists[key].append(meta_data[key])
-        else:
-            img, meta_data = self.read_image(path[0], path[1])
+
+        if type(path) is str:
+            img, meta_data = self.read_image(path)
             np_img_list.append(img)
             for key in meta_data.keys():
                 if self.verbose:
                     print(key)
                 meta_data_lists[key].append(meta_data[key])
+        elif type(path) is list:
+            for i in path:
+                img, meta_data = self.read_image(i)
+                np_img_list.append(img)
+                for key in meta_data.keys():
+                    if self.verbose:
+                        print(key)
+                        print(meta_data_lists[key])
+                    meta_data_lists[key].append(meta_data[key])
+        elif type(path) is dict:
+            pass
 
         return np_img_list, meta_data_lists
 
