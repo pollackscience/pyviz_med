@@ -36,7 +36,7 @@ class PyPatient:
             print(img_metadata, len(np_img_list))
         np_overlay_list, _ = self.get_overlay_list(overlay_path)
         self.orient_images(np_img_list, img_metadata)
-        self.orient_images(np_overlay_list, img_metadata)
+        self.orient_overlays(np_overlay_list, img_metadata)
 
         np_img_stack, np_overlay_stack = self.pad_and_stack_images(np_img_list, np_overlay_list)
 
@@ -123,6 +123,41 @@ class PyPatient:
                     np_img_list[i] = np.flip(np_img_list[i], axis=0)
 
 
+    def orient_overlays(self, np_overlay_list, img_metadata, bad=False):
+        if self.verbose:
+            print(img_metadata)
+        if np_overlay_list is None:
+            return None
+
+        for i in range(len(np_overlay_list)):
+            # loop over overlays (overlay_labels)
+            if type(np_overlay_list[i]) is list:
+                # loop over images (labels)
+                for j in range(len(np_overlay_list[i])):
+                    if self.verbose:
+                        print(img_metadata['direction'][j])
+                    if img_metadata['direction'][j][0] < 0:
+                        np_overlay_list[i][j] = np.flip(np_overlay_list[i][j], axis=2)
+                    if img_metadata['direction'][j][4] > 0:
+                        np_overlay_list[i][j] = np.flip(np_overlay_list[i][j], axis=1)
+                    if img_metadata['direction'][j][8] < 0:
+                        np_overlay_list[i][j] = np.flip(np_overlay_list[i][j], axis=0)
+
+            else:
+                if self.verbose:
+                    print(img_metadata['direction'][0])
+                if img_metadata['direction'][0][0] < 0:
+                    np_overlay_list[i] = np.flip(np_overlay_list[i], axis=2)
+                if bad:
+                    if img_metadata['direction'][0][4] < 0:
+                        np_overlay_list[i] = np.flip(np_overlay_list[i], axis=1)
+                else:
+                    if img_metadata['direction'][0][4] > 0:
+                        np_overlay_list[i] = np.flip(np_overlay_list[i], axis=1)
+                if img_metadata['direction'][0][8] < 0:
+                    np_overlay_list[i] = np.flip(np_overlay_list[i], axis=0)
+
+
     def get_file_type(self, path):
         '''Automatically determine file type based on path name.'''
         pass
@@ -147,10 +182,8 @@ class PyPatient:
         '''Read image from path, and store image object'''
         # Clean args
         path = Path(path)
-        print(img_type)
         if img_type is None:
             path = self.parse_path(path)
-            print(path)
         else:
             img_type = img_type.lower()
 
@@ -254,8 +287,8 @@ class PyPatient:
                 meta_data_lists[key].append(meta_data[key])
 
         elif type(path) is list:
-            if len(path) == 1:
-                path = path[0]
+        #     if len(path) == 1:
+        #         path = path[0]
             for i in path:
                 if type(i) is tuple:
                     pass
@@ -282,11 +315,9 @@ class PyPatient:
 
 
     def pad_and_stack_images(self, img_list, overlay_list=None):
+        n_imgs = len(img_list)
         if self.verbose:
-            print('len img_list', len(img_list))
-            if overlay_list:
-                print(len(overlay_list))
-                print(overlay_list)
+            print('len img_list', n_imgs)
         max_z = max_y = max_x = 0
 
         for img in img_list:
@@ -319,49 +350,52 @@ class PyPatient:
 
         img_list = np.stack(img_list, axis=0)
 
+        padded_overlay = None
         if overlay_list is not None:
-            pad_overlay = np.zeros((n_overlay_labels, max_z, max_y, max_x))
+            padded_overlay = np.zeros((n_imgs, n_overlay_labels, max_z, max_y, max_x))
+            # print(padded_overlay.shape)
+            # Loop over overlays
+            feat = 0
             for i,overlay in enumerate(overlay_list):
-                pad_copy = pad_overlay.copy()
                 if type(overlay) is list:
-                    feat = 0
+                    # Loop over images
                     for j,sub_overlay in enumerate(overlay):
                         if sub_overlay.ndim == 3:
-                            pad_copy[feat, :sub_overlay.shape[0], :sub_overlay.shape[1], :sub_overlay.shape[2]]=sub_overlay
-                            feat += 1
+                            # print(sub_overlay.shape)
+                            # print(j, feat)
+                            padded_overlay[j, feat, :sub_overlay.shape[0], :sub_overlay.shape[1], :sub_overlay.shape[2]]=sub_overlay
                         elif sub_overlay.ndim == 4:
-                            pad_copy[feat:feat+sub_overlay.shape[0], :sub_overlay.shape[1], :sub_overlay.shape[2], :sub_overlay.shape[3]]=sub_overlay
-                            feat += sub_overlay.shape[0]
+                            padded_overlay[j, feat:feat+sub_overlay.shape[0], :sub_overlay.shape[1],
+                                           :sub_overlay.shape[2], :sub_overlay.shape[3]]=sub_overlay
+                    if sub_overlay.ndim == 3:
+                        feat += 1
+                    elif sub_overlay.ndim == 4:
+                        feat += sub_overlay.shape[0]
 
                 else:
                     if overlay.ndim == 3:
-                        pad_copy[0, :overlay.shape[0], :overlay.shape[1], :overlay.shape[2]]=overlay
+                        padded_overlay[0, feat, :overlay.shape[0], :overlay.shape[1], :overlay.shape[2]]=overlay
+                        feat += 1
                     elif overlay.ndim == 4:
-                        pad_copy[0:overlay.shape[0], :overlay.shape[1], :overlay.shape[2], :overlay.shape[3]]=overlay
-                overlay_list[i] = pad_copy
+                        padded_overlay[0, feat:feat+overlay.shape[0], :overlay.shape[1], :overlay.shape[2], :overlay.shape[3]]=overlay
+                        feat += overlay.shape[0]
 
-            overlay_list = np.stack(overlay_list, axis=0)
-
-        return img_list, overlay_list
+        return img_list, padded_overlay
 
     def get_n_overlay_labels(self, overlay_list):
-        total_overlay_labels = 0
-        for i in overlay_list:
-            sub_overlay_labels = 0
-            if type(i) is list:
-                for j in i:
-                    if len(j.shape) == 3:
-                        sub_overlay_labels += 1
-                    elif len(j.shape) == 4:
-                        sub_overlay_labels += j.shape[0]
-            else:
-                if len(i.shape) == 3:
-                    sub_overlay_labels += 1
-                elif len(i.shape) == 4:
-                    sub_overlay_labels += j.shape[0]
-            total_overlay_labels = max(total_overlay_labels, sub_overlay_labels)
+        return len(overlay_list)
+        # n_overlay_labels = 0
+        # if type(overlay_list[0]) is list:
+        #     overlay_iters = overlay_list[0]
+        # else:
+        #     overlay_iters = overlay_list
+        # for i in overlay_iters:
+        #     if len(i.shape) == 3:
+        #         n_overlay_labels += 1
+        #     elif len(i.shape) == 4:
+        #         n_overlay_labels += i.shape[0]
 
-        return total_overlay_labels
+        # return n_overlay_labels
 
     def view(self, plane='axial', three_planes=False, image_size=300, dynamic=True):
         # imopts = {'tools': ['hover'], 'width': 400, 'height': 400, 'cmap': 'gray'}
@@ -394,7 +428,19 @@ class PyPatient:
             pane_width = self.sagittal_width
             pane_height = self.sagittal_height
 
-        cslider = pn.widgets.RangeSlider(start=-3000, end=3000, value=(0, 800), name='contrast')
+        contrast_start_min = np.asscalar(self.ds.isel(subject_id=0,
+                                                    label=0).image.quantile(0.01).values)
+        contrast_start_max = np.asscalar(self.ds.isel(subject_id=0,
+                                                    label=0).image.quantile(0.99).values)
+        contrast_min = np.asscalar(self.ds.isel(subject_id=0, label=0).image.min().values)
+        contrast_max = np.asscalar(self.ds.isel(subject_id=0, label=0).image.max().values)
+        ctotal = contrast_max - contrast_min
+        contrast_min -= ctotal*0.1
+        contrast_max += ctotal*0.1
+
+        cslider = pn.widgets.RangeSlider(start=contrast_min, end=contrast_max,
+                                         value=(contrast_start_min, contrast_start_max),
+                                         name='contrast')
         if 'overlay' in self.ds.data_vars:
             hv_ds_image = hv.Dataset(self.ds['image'])
             if self.verbose:
@@ -494,7 +540,7 @@ class PyPatient:
                 squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
                 gridspace = hv.GridSpace(kdims=['plane', 'label'])
-                for mod in self.label:
+                for mod in self.ds.label.values:
                     gridspace['axial', mod] = hv_ds_image.select(label=mod).to(
                         hv.Image, ['x', 'y'], groupby=['subject_id', 'z'], vdims='image',
                         dynamic=dynamic).opts(
@@ -615,13 +661,16 @@ class PyPatient:
         z_spacing = init_spacing[2]
 
         self.axial_width = int(size)
-        self.axial_height = int(size*x_spacing/y_spacing)
+        axial_scale = self.axial_width/(len(self.ds.x)*x_spacing)
+        self.axial_height = int(y_spacing*len(self.ds.y)*axial_scale)
 
         self.coronal_width = int(size)
-        self.coronal_height = int(size*x_spacing/z_spacing)
+        coronal_scale = self.coronal_width/(len(self.ds.x)*x_spacing)
+        self.coronal_height = int(z_spacing*len(self.ds.z)*coronal_scale)
 
         self.sagittal_width = int(size)
-        self.sagittal_height = int(size*y_spacing/z_spacing)
+        sagittal_scale = self.sagittal_width/(len(self.ds.y)*y_spacing)
+        self.sagittal_height = int(z_spacing*len(self.ds.z)*sagittal_scale)
 
 
 
