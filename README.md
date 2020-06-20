@@ -1,5 +1,5 @@
 # PyViz Med
-Medical image viewer for pyviz.
+Interactive medical image viewer for jupyter notebooks.
 
 ## Installation
 We recommend using Anaconda to manage dependencies and virtual environments.
@@ -13,6 +13,19 @@ We recommend using Anaconda to manage dependencies and virtual environments.
 `git clone https://github.com/pollackscience/pyviz_med`  
 `cd pyviz_med`  
 `pip install -e .`  
+`cd ..`
+
+
+## Basic Tutorial
+1. Download the CHAOS abdominal segmentation data (https://zenodo.org/record/3431873):  
+    `cd pyviz_med/data/CHAOS`  
+    `wget -O CHAOS.zip https://zenodo.org/record/3431873/files/CHAOS_Train_Sets.zip?download=1`  
+    `unzip CHAOS.zip`
+1. Open up the jupyter notebook `pyviz_med/notebook/CHAOS_Tutorial.ipynb`
+1. Run all cells!
+
+![Image of CHAOS Example](doc/chaos_example.png)
+
 
 
 

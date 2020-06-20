@@ -50,3 +50,4 @@ Thumbs.db
 # Data Files #
 data/*
 !/data/README.md
+!/data/CHAOS/README.md
