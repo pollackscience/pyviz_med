@@ -1,14 +1,18 @@
 # PyViz Med
 Medical image viewer for pyviz.
 
-## Install
-Do this within your prefered conda env.
-Dependencies:
-(use conda for these)
-holoviews, bokeh, xarray, numpy, simpleitk
+## Installation
+We recommend using Anaconda to manage dependencies and virtual environments.
+
+### Dependencies:
+    1. Holoviews: `conda install -c pyviz holoviews bokeh datashader panel`
+    1. xArray: `conda install -c conda-forge xarray dask netCDF4 bottleneck`
+    1. SimpleITK: `conda install -c https://conda.anaconda.org/simpleitk SimpleITK`
+
+### Pyviz_med
 `git clone https://github.com/pollackscience/pyviz_med`
 `cd pyviz_med`
-`python setup.py develop`
+`pip install -e .`
 
 
 
