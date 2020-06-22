@@ -639,7 +639,7 @@ class PyPatient:
                 for mod in self.label:
                     gridspace[mod] = hv_ds.select(label=mod).to(
                         hv.Image, [a1, a2], groupby=['subject_id', a3], vdims='image',
-                        dynamic=dynamic).opts(frame_width=pane_width, frame_height=self.pane_height,
+                        dynamic=dynamic).opts(frame_width=pane_width, frame_height=pane_height,
                                               shared_axes=False).apply.opts(clim=cslider.param.value)
 
         pn_layout = pn.pane.HoloViews(gridspace)

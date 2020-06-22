@@ -31,3 +31,4 @@ We recommend using Anaconda to manage dependencies and virtual environments.
 
 
 Brian Pollack 2020
+University of Pittsburgh

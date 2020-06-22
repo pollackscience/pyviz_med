@@ -51,3 +51,6 @@ Thumbs.db
 data/*
 !/data/README.md
 !/data/CHAOS/README.md
+
+# Test stuff
+test_notebooks/*
