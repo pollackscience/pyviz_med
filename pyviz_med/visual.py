@@ -19,10 +19,20 @@ from bokeh.models import FuncTickFormatter
 class PyPatient:
     """Class for holding image and metadata for a patient."""
 
-    def __init__(self, path, img_type='infer', overlay_path=None, from_xarray=False, *args, **kwargs):
+    def __init__(self, path=None, img_type='infer', overlay_path=None, from_xarray=False,
+                 *args, **kwargs):
         '''Initialize via reading the image and creating the xarray.'''
 
         self.verbose = kwargs.get('verbose', False)
+        if from_xarray:
+            self.ds = kwargs.get('ds', None)
+            if self.ds is None:
+                raise TypeError('"from_xarray" is True, requires "ds" kwarg"')
+            return None
+
+        if path is None:
+            raise TypeError('Must specify "path" if "from_xarray" is False')
+
         # Initial trimming of path arg
         if type(path) is dict:
             self.label = list(path.keys())
@@ -59,15 +69,15 @@ class PyPatient:
                                   'spacing': (['subject_id', 'label', 'img_dims'],
                                               [img_metadata['spacing']]),
                                   'origin': (['subject_id', 'label', 'img_dims'],
-                                              [img_metadata['origin']]),
-                                 },
+                                             [img_metadata['origin']]),
+                                  },
                                  coords={'subject_id': [self.subject_id],
                                          'label': self.label,
                                          'z': range(np_img_stack.shape[1]),
                                          'y': range(np_img_stack.shape[2]),
                                          'x': range(np_img_stack.shape[3]),
                                          'img_dims': range(3),
-                                        }
+                                         }
                                  )
         else:
             if not hasattr(self, 'overlay_label'):
@@ -75,13 +85,14 @@ class PyPatient:
                                                                   range(self.n_overlay)])
             self.ds = xr.Dataset({'image': (['subject_id', 'label', 'z', 'y', 'x'],
                                             np_img_stack[np.newaxis, :]),
-                                  'overlay': (['subject_id', 'label', 'overlay_label', 'z', 'y', 'x'],
+                                  'overlay': (['subject_id', 'label', 'overlay_label',
+                                               'z', 'y', 'x'],
                                               np_overlay_stack[np.newaxis, :]),
                                   'spacing': (['subject_id', 'label', 'img_dims'],
                                               [img_metadata['spacing']]),
                                   'origin': (['subject_id', 'label', 'img_dims'],
-                                              [img_metadata['origin']]),
-                                 },
+                                             [img_metadata['origin']]),
+                                  },
                                  coords={'subject_id': [self.subject_id],
                                          'label': self.label,
                                          'overlay_label': self.overlay_label,
@@ -89,8 +100,9 @@ class PyPatient:
                                          'y': range(np_img_stack.shape[2]),
                                          'x': range(np_img_stack.shape[3]),
                                          'img_dims': range(3),
-                                        }
+                                         }
                                  )
+
     def orient_images(self, np_img_list, img_metadata, bad=False):
         if self.verbose:
             print(img_metadata)
@@ -121,7 +133,6 @@ class PyPatient:
                         np_img_list[i] = np.flip(np_img_list[i], axis=1)
                 if img_metadata['direction'][i][8] < 0:
                     np_img_list[i] = np.flip(np_img_list[i], axis=0)
-
 
     def orient_overlays(self, np_overlay_list, img_metadata, bad=False):
         if self.verbose:
@@ -156,7 +167,6 @@ class PyPatient:
                         np_overlay_list[i] = np.flip(np_overlay_list[i], axis=1)
                 if img_metadata['direction'][0][8] < 0:
                     np_overlay_list[i] = np.flip(np_overlay_list[i], axis=0)
-
 
     def get_file_type(self, path):
         '''Automatically determine file type based on path name.'''
@@ -230,14 +240,13 @@ class PyPatient:
                 img_slice = sitk.GetArrayFromImage(sitk.ReadImage(str(png)))
                 if i == 0:
                     image = np.zeros((len(png_list), img_slice.shape[0],
-                                              img_slice.shape[1]), dtype=img_slice.dtype)
+                                      img_slice.shape[1]), dtype=img_slice.dtype)
                 image[i, :, :] = img_slice
             direction = None
             origin = None
             spacing = None
 
         return image, {'spacing': spacing, 'origin': origin, 'direction': direction}
-
 
     def get_img_list(self, path, get_metadata=True):
         '''Return a list of images in numpy format (and metadata, optional).
@@ -247,7 +256,7 @@ class PyPatient:
             return None, None
 
         np_img_list = []
-        meta_data_lists = {'direction':[], 'origin':[], 'spacing':[]}
+        meta_data_lists = {'direction': [], 'origin': [], 'spacing': []}
 
         if type(path) is str:
             img, meta_data = self.read_image(path)
@@ -276,7 +285,7 @@ class PyPatient:
             return None, None
 
         np_overlay_list = []
-        meta_data_lists = {'direction':[], 'origin':[], 'spacing':[]}
+        meta_data_lists = {'direction': [], 'origin': [], 'spacing': []}
 
         if type(path) is str:
             img, meta_data = self.read_image(path)
@@ -287,8 +296,6 @@ class PyPatient:
                 meta_data_lists[key].append(meta_data[key])
 
         elif type(path) is list:
-        #     if len(path) == 1:
-        #         path = path[0]
             for i in path:
                 if type(i) is tuple:
                     pass
@@ -312,7 +319,6 @@ class PyPatient:
                         meta_data_lists[key].append(meta_data[key])
 
         return np_overlay_list, meta_data_lists
-
 
     def pad_and_stack_images(self, img_list, overlay_list=None):
         n_imgs = len(img_list)
@@ -343,9 +349,9 @@ class PyPatient:
                     max_x = max(img.shape[-1], max_x)
         pad = np.zeros((max_z, max_y, max_x))
 
-        for i,img in enumerate(img_list):
+        for i, img in enumerate(img_list):
             pad_copy = pad.copy()
-            pad_copy[:img.shape[0], :img.shape[1], :img.shape[2]]=img
+            pad_copy[:img.shape[0], :img.shape[1], :img.shape[2]] = img
             img_list[i] = pad_copy
 
         img_list = np.stack(img_list, axis=0)
@@ -356,17 +362,19 @@ class PyPatient:
             # print(padded_overlay.shape)
             # Loop over overlays
             feat = 0
-            for i,overlay in enumerate(overlay_list):
+            for i, overlay in enumerate(overlay_list):
                 if type(overlay) is list:
                     # Loop over images
-                    for j,sub_overlay in enumerate(overlay):
+                    for j, sub_overlay in enumerate(overlay):
                         if sub_overlay.ndim == 3:
                             # print(sub_overlay.shape)
                             # print(j, feat)
-                            padded_overlay[j, feat, :sub_overlay.shape[0], :sub_overlay.shape[1], :sub_overlay.shape[2]]=sub_overlay
+                            padded_overlay[j, feat, :sub_overlay.shape[0], :sub_overlay.shape[1],
+                                           :sub_overlay.shape[2]] = sub_overlay
                         elif sub_overlay.ndim == 4:
                             padded_overlay[j, feat:feat+sub_overlay.shape[0], :sub_overlay.shape[1],
-                                           :sub_overlay.shape[2], :sub_overlay.shape[3]]=sub_overlay
+                                           :sub_overlay.shape[2],
+                                           :sub_overlay.shape[3]] = sub_overlay
                     if sub_overlay.ndim == 3:
                         feat += 1
                     elif sub_overlay.ndim == 4:
@@ -374,10 +382,12 @@ class PyPatient:
 
                 else:
                     if overlay.ndim == 3:
-                        padded_overlay[0, feat, :overlay.shape[0], :overlay.shape[1], :overlay.shape[2]]=overlay
+                        padded_overlay[0, feat, :overlay.shape[0], :overlay.shape[1],
+                                       :overlay.shape[2]] = overlay
                         feat += 1
                     elif overlay.ndim == 4:
-                        padded_overlay[0, feat:feat+overlay.shape[0], :overlay.shape[1], :overlay.shape[2], :overlay.shape[3]]=overlay
+                        padded_overlay[0, feat:feat+overlay.shape[0], :overlay.shape[1],
+                                       :overlay.shape[2], :overlay.shape[3]] = overlay
                         feat += overlay.shape[0]
 
         return img_list, padded_overlay
@@ -399,39 +409,41 @@ class PyPatient:
 
     def view(self, plane='axial', three_planes=False, image_size=300, dynamic=True):
         # imopts = {'tools': ['hover'], 'width': 400, 'height': 400, 'cmap': 'gray'}
-        imopts = {'tools': ['hover'], 'cmap': 'gray'}
+        # imopts = {'tools': ['hover'], 'cmap': 'gray'}
         opts.defaults(
             opts.GridSpace(shared_xaxis=False, shared_yaxis=False,
                            fontsize={'title': 16, 'labels': 16, 'xticks': 12,
                                      'yticks': 12},
                            ),
-            opts.Image(cmap='gray', tools=['hover'], xaxis=None,
+            # opts.Image(cmap='gray', tools=['hover'], xaxis=None,
+            #            yaxis=None, shared_axes=False),
+            # opts.Overlay(tools=['hover']),
+            # opts.NdOverlay(tools=['hover']),
+            opts.Image(cmap='gray', xaxis=None,
                        yaxis=None, shared_axes=False),
-            opts.Overlay(tools=['hover']),
-            opts.NdOverlay(tools=['hover']),
         )
 
         self.set_size(image_size)
-        if plane=='axial':
+        if plane == 'axial':
             a1, a2, a3 = 'x', 'y', 'z'
-            invert=True
+            # invert = True
             pane_width = self.axial_width
             pane_height = self.axial_height
-        elif plane=='coronal':
+        elif plane == 'coronal':
             a1, a2, a3 = 'x', 'z', 'y'
             pane_width = self.coronal_width
             pane_height = self.coronal_height
-            invert=False
-        elif plane=='sagittal':
+            # invert = False
+        elif plane == 'sagittal':
             a1, a2, a3 = 'y', 'z', 'x'
-            invert=False
+            # invert = False
             pane_width = self.sagittal_width
             pane_height = self.sagittal_height
 
         contrast_start_min = np.asscalar(self.ds.isel(subject_id=0,
-                                                    label=0).image.quantile(0.01).values)
+                                                      label=0).image.quantile(0.01).values)
         contrast_start_max = np.asscalar(self.ds.isel(subject_id=0,
-                                                    label=0).image.quantile(0.99).values)
+                                                      label=0).image.quantile(0.99).values)
         contrast_min = np.asscalar(self.ds.isel(subject_id=0, label=0).image.min().values)
         contrast_max = np.asscalar(self.ds.isel(subject_id=0, label=0).image.max().values)
         ctotal = contrast_max - contrast_min
@@ -442,20 +454,19 @@ class PyPatient:
                                          value=(contrast_start_min, contrast_start_max),
                                          name='contrast')
         if 'overlay' in self.ds.data_vars:
-            hv_ds_image = hv.Dataset(self.ds['image'])
+            hv_ds_image = hv.Dataset(self.ds[['image', 'overlay']])
+            # hv_ds_image = hv.Dataset(self.ds['image'])
             if self.verbose:
                 print(hv_ds_image)
             hv_ds_overlay = hv.Dataset(self.ds['overlay'])
             if self.verbose:
                 print(hv_ds_overlay)
-            tooltips = [
-                ('x', '@x'),
-                ('y', '@y'),
-                ('z', '@z'),
-                ('image', '@image'),
-                ('overlay', '@overlay')
-            ]
-            hover = HoverTool(tooltips=tooltips)
+            # tooltips = [
+            #     ('(x,y)', '($x, $y)'),
+            #     ('image', '@image'),
+            #     ('overlay', '@overlay')
+            # ]
+            # hover = HoverTool(tooltips=tooltips)
             if self.verbose:
                 print('overlay_max_calc')
             first_subj_max = self.ds.isel(subject_id=0).overlay.max(dim=['x', 'y', 'z',
@@ -466,9 +477,10 @@ class PyPatient:
                 print('overlay_max_calc ready')
                 print(first_subj_max)
             overlay_max = first_subj_max.max()
-            alpha_slider = pn.widgets.FloatSlider(start=0, end=1, value=0.7, name='overlay transparency')
-            cmap_select = pn.widgets.Select(name='Overlay Colormap', options=['Discrete',
-                                                                              'Continuous'])
+            alpha_slider = pn.widgets.FloatSlider(start=0, end=1, value=0.7,
+                                                  name='overlay transparency')
+            cmap_select = pn.widgets.Select(name='Overlay Colormap',
+                                            options=['Discrete', 'Continuous'])
 
             if self.verbose:
                 print('max thresh calc')
@@ -478,8 +490,8 @@ class PyPatient:
                 max_thresholds = sorted(set(max_thresholds))
             else:
                 max_thresholds = [np.asscalar(max_thresholds)]
-            # max_thresholds = sorted(list(set([first_subj.overlay.sel(overlay_label=i).values.max() for i in
-            #                        first_subj.overlay_label])))
+            # max_thresholds = sorted(list(set([first_subj.overlay.sel(overlay_label=i).values.max()
+            #                         for i in first_subj.overlay_label])))
             if self.verbose:
                 print('min thresh calc')
             min_thresholds = first_subj_min.values+1e-6
@@ -490,91 +502,107 @@ class PyPatient:
             # min_thresholds = sorted(list(set(first_subj_min.min())))
             # min_thresholds = sorted(list(set([first_subj.sel(overlay_label=i).min()+1e-6 for i in
             #                        first_subj.overlay_label])))
-            ocslider = pn.widgets.DiscreteSlider(name='overlay max threshold', options=max_thresholds,
-                                                value=max_thresholds[-1])
+            # ocslider = pn.widgets.DiscreteSlider(name='overlay max threshold',
+            #                                      options=max_thresholds,
+            #                                     value=max_thresholds[-1])
             if len(min_thresholds) == 1 and len(max_thresholds) == 1:
-                thresh_toggle=0
+                thresh_toggle = 0
                 oclim = (min_thresholds[0], max_thresholds[0])
 
             elif len(min_thresholds) > 1 and len(max_thresholds) == 1:
-                thresh_toggle=1
+                thresh_toggle = 1
                 ocslider_min = pn.widgets.DiscreteSlider(name='overlay min threshold',
-                                                     options=min_thresholds,
-                                                     value=min_thresholds[-1])
+                                                         options=min_thresholds,
+                                                         value=min_thresholds[-1])
+
                 @pn.depends(ocslider_min)
                 def oclim(value):
                     return (value, max_thresholds[0])
 
             elif len(min_thresholds) == 1 and len(max_thresholds) > 1:
-                thresh_toggle=2
+                thresh_toggle = 2
                 ocslider_max = pn.widgets.DiscreteSlider(name='overlay max threshold',
-                                                     options=max_thresholds,
-                                                     value=max_thresholds[-1])
+                                                         options=max_thresholds,
+                                                         value=max_thresholds[-1])
+
                 @pn.depends(ocslider_max)
                 def oclim(value):
                     return (min_thresholds[0], value)
 
             else:
-                thresh_toggle=3
+                thresh_toggle = 3
                 ocslider_min = pn.widgets.DiscreteSlider(name='overlay min threshold',
-                                                     options=min_thresholds,
-                                                     value=min_thresholds[-1])
+                                                         options=min_thresholds,
+                                                         value=min_thresholds[-1])
                 ocslider_max = pn.widgets.DiscreteSlider(name='overlay max threshold',
-                                                     options=max_thresholds,
-                                                     value=max_thresholds[-1])
+                                                         options=max_thresholds,
+                                                         value=max_thresholds[-1])
+
                 @pn.depends(ocslider_min, ocslider_max)
                 def oclim(value_min, value_max):
                     return (value_min, value_max)
 
             if self.verbose:
                 print(thresh_toggle)
+
             @pn.depends(cmap_select)
             def cmap_dict(value):
-                d = {'Discrete': 'glasbey_hv','Continuous': 'viridis'}
+                d = {'Discrete': 'glasbey_hv', 'Continuous': 'viridis'}
                 return d[value]
 
-
-            # subj_viewer = SubjectViewer(ds=self.ds, subject_id_sel=list(self.ds.subject_id.values))
+            # subj_viewer = SubjectViewer(ds=self.ds,
+            #                             subject_id_sel=list(self.ds.subject_id.values))
 
             if three_planes:
-                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                # squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
                 gridspace = hv.GridSpace(kdims=['plane', 'label'])
                 for mod in self.ds.label.values:
                     gridspace['axial', mod] = hv_ds_image.select(label=mod).to(
                         hv.Image, ['x', 'y'], groupby=['subject_id', 'z'], vdims='image',
-                        dynamic=dynamic).opts(
-                            frame_width=self.axial_width, frame_height=self.axial_height).apply.opts(clim=cslider.param.value)
+                        dynamic=dynamic).opts(frame_width=self.axial_width,
+                                              frame_height=self.axial_height
+                                              ).apply.opts(clim=cslider.param.value)
                     gridspace['coronal', mod] = hv_ds_image.select(label=mod).to(
                         hv.Image, ['x', 'z'], groupby=['subject_id', 'y'], vdims='image',
                         dynamic=dynamic).opts(frame_width=self.coronal_width,
-                                              frame_height=self.coronal_height).apply.opts(clim=cslider.param.value)
+                                              frame_height=self.coronal_height
+                                              ).apply.opts(clim=cslider.param.value)
                     gridspace['sagittal', mod] = hv_ds_image.select(label=mod).to(
                         hv.Image, ['y', 'z'], groupby=['subject_id', 'x'], vdims='image',
                         dynamic=dynamic).opts(frame_width=self.sagittal_width,
-                                              frame_height=self.sagittal_height).apply.opts(clim=cslider.param.value)
+                                              frame_height=self.sagittal_height
+                                              ).apply.opts(clim=cslider.param.value)
 
                     gridspace['axial', mod] *= hv_ds_overlay.select(label=mod).to(
-                        hv.Image, ['x', 'y'], groupby=['subject_id', 'z', 'overlay_label'], vdims='overlay',
-                        dynamic=dynamic).opts(
-                            cmap='glasbey_hv', clipping_colors={'min': 'transparent', 'NaN': 'transparent'},
-                        ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
-                            alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+                        hv.Image, ['x', 'y'], groupby=['subject_id', 'z', 'overlay_label'],
+                        vdims='overlay', dynamic=dynamic
+                    ).opts(
+                        cmap='glasbey_hv', clipping_colors={'min': 'transparent', 'NaN':
+                                                            'transparent'},
+                    ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
+                        alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+
                     gridspace['coronal', mod] *= hv_ds_overlay.select(label=mod).to(
-                        hv.Image, ['x', 'z'], groupby=['subject_id', 'y', 'overlay_label'], vdims='overlay',
-                        dynamic=dynamic).opts(
-                            cmap='glasbey_hv', clipping_colors={'min': 'transparent', 'NaN': 'transparent'},
-                        ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
-                            alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+                        hv.Image, ['x', 'z'], groupby=['subject_id', 'y', 'overlay_label'],
+                        vdims='overlay', dynamic=dynamic
+                    ).opts(
+                        cmap='glasbey_hv', clipping_colors={'min': 'transparent', 'NaN':
+                                                            'transparent'},
+                    ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
+                        alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+
                     gridspace['sagittal', mod] *= hv_ds_overlay.select(label=mod).to(
-                        hv.Image, ['y', 'z'], groupby=['subject_id', 'x', 'overlay_label'], vdims='overlay',
-                        dynamic=dynamic).opts(
-                            cmap='glasbey_hv', clipping_colors={'min': 'transparent', 'NaN': 'transparent'},
-                        ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
-                            alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+                        hv.Image, ['y', 'z'], groupby=['subject_id', 'x', 'overlay_label'],
+                        vdims='overlay', dynamic=dynamic
+                    ).opts(
+                        cmap='glasbey_hv', clipping_colors={'min': 'transparent', 'NaN':
+                                                            'transparent'},
+                    ).redim.range(overlay=(0.1, overlay_max)).apply.opts(
+                        alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
 
             else:
-                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                # squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['label'], label=f'{self.subject_id}')
                 if self.verbose:
                     print('init gridspace')
@@ -593,28 +621,36 @@ class PyPatient:
                 #     gridspace[mod] = gridspace[mod].opts(tools=['hover'])
                 #     print(gridspace[mod])
 
-
                 gridspace = hv_ds_image.to(
-                    hv.Image, [a1, a2], vdims='image',
+                    hv.Image, [a1, a2], vdims=['image', 'overlay'],
                     dynamic=dynamic).opts(frame_width=pane_width, frame_height=pane_height,
+                                          tools=['hover'],
                                           ).apply.opts(clim=cslider.param.value)
                 if self.verbose:
                     print(gridspace)
                 gridspace *= hv_ds_overlay.to(
                     hv.Image, [a1, a2], vdims='overlay',
-                    dynamic=dynamic).opts(
-                        cmap='glasbey_hv', clipping_colors={'min': 'transparent', 'NaN': 'transparent'},
-                    ).redim.range(overlay=(1e-6, overlay_max)).apply.opts(
-                        alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+                    dynamic=dynamic
+                ).opts(
+                    cmap='glasbey_hv', clipping_colors={'min': 'transparent',
+                                                        'NaN': 'transparent'},
+                ).redim.range(overlay=(1e-6, overlay_max)).apply.opts(
+                    alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
                 # print(gridspace)
                 # print(gridspace)
                 # gridspace = hv.DynamicMap(subj_viewer.load_subject).grid('label')
-                gridspace = gridspace.grid('label')
+                gridspace = gridspace.layout('label')
 
         else:
+            tooltips = [
+                ('(x,y)', '($x, $y)'),
+                ('image', '@image'),
+            ]
+            hover = HoverTool(tooltips=tooltips)
             hv_ds = hv.Dataset(self.ds['image'])
+            print(hv_ds)
             if three_planes:
-                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                # squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
                 gridspace = hv.GridSpace(kdims=['plane', 'label'])
                 for mod in self.label:
@@ -622,25 +658,29 @@ class PyPatient:
                         hv.Image, ['x', 'y'], groupby=['subject_id', 'z'], vdims='image',
                         dynamic=dynamic).opts(frame_width=self.axial_width,
                                               frame_height=self.axial_height,
-                                              invert_yaxis=False).apply.opts(clim=cslider.param.value)
+                                              invert_yaxis=False).apply.opts(
+                                                  clim=cslider.param.value)
                     gridspace['coronal', mod] = hv_ds.select(label=mod).to(
                         hv.Image, ['x', 'z'], groupby=['subject_id', 'y'], vdims='image',
                         dynamic=dynamic).opts(frame_width=self.coronal_width,
-                                              frame_height=self.coronal_height).apply.opts(clim=cslider.param.value)
+                                              frame_height=self.coronal_height).apply.opts(
+                                                  clim=cslider.param.value)
                     gridspace['sagittal', mod] = hv_ds.select(label=mod).to(
                         hv.Image, ['y', 'z'], groupby=['subject_id', 'x'], vdims='image',
                         dynamic=dynamic).opts(frame_width=self.sagittal_width,
-                                              frame_height=self.sagittal_height).apply.opts(clim=cslider.param.value)
+                                              frame_height=self.sagittal_height).apply.opts(
+                                                  clim=cslider.param.value)
 
             else:
-                squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
+                # squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['label'], label=f'{self.subject_id}')
                 gridspace = hv.GridSpace(kdims=['label'])
                 for mod in self.label:
                     gridspace[mod] = hv_ds.select(label=mod).to(
                         hv.Image, [a1, a2], groupby=['subject_id', a3], vdims='image',
                         dynamic=dynamic).opts(frame_width=pane_width, frame_height=pane_height,
-                                              shared_axes=False).apply.opts(clim=cslider.param.value)
+                                              shared_axes=False, tools=[hover],
+                                              ).apply.opts(clim=cslider.param.value)
 
         pn_layout = pn.pane.HoloViews(gridspace)
         wb = pn_layout.widget_box
@@ -673,7 +713,6 @@ class PyPatient:
         self.sagittal_height = int(z_spacing*len(self.ds.z)*sagittal_scale)
 
 
-
 class PyCohort(PyPatient):
     """Class for veiwing image and metadata for a cohort of patients."""
 
@@ -681,7 +720,6 @@ class PyCohort(PyPatient):
         '''Initialize via reading the image and creating the xarray.'''
         self.ds = self.load_files(path)
         self.verbose = kwargs.get('verbose', False)
-
 
     def load_files(self, file_names):
         if type(file_names) is not list:
@@ -695,28 +733,3 @@ class PyCohort(PyPatient):
         else:
             ds = xr.open_dataset(file_names)
         return ds
-
-
-# class SubjectViewer(param.Parameterized):
-#     ds = param.ClassSelector(class_=xr.Dataset)
-#     subject_id_sel = param.ObjectSelector(default='18725M')
-#     slice_sel = param.Integer(default=0, bounds=(0,400))
-#
-#     @param.depends('subject_id_sel', 'ds', 'slice_sel')
-#     def load_subject(self):
-#         subj_ds = self.ds.sel(subject_id=self.subject_id_sel, z=[self.slice_sel],
-#                               label='Expiratory CT').compute()
-#         # return hv.Curve(df, ('date', 'Date'),
-#         #                 self.variable).opts(framewise=True)
-#
-#         # gridspace = hv_ds_image.to(
-#         #     hv.Image, [a1, a2], vdims='image',
-#         #     dynamic=dynamic).opts(framewise=True, frame_width=image_size, frame_height=image_size,
-#         #                           ).apply.opts(clim=cslider.param.value)
-#         # hv_ds_image = hv.Dataset(subj_ds['image'])
-#         # hv_ds_overlay = hv.Dataset(subj_ds['overlay'])
-#         gridspace = hv.Image(subj_ds, kdims=['x', 'y'], vdims='image', dynamic=False).opts(framewise=True,
-#                                                                                      frame_width=500,
-#                                                                                      frame_height=500)
-#
-#         return gridspace
