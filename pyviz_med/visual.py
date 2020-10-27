@@ -12,6 +12,7 @@ import holoviews as hv
 from holoviews import opts
 from holoviews.operation.datashader import datashade, shade, dynspread, rasterize
 from bokeh.models import FuncTickFormatter
+from skimage import color
 
 # hv.extension('bokeh')
 
@@ -106,6 +107,7 @@ class PyPatient:
     def orient_images(self, np_img_list, img_metadata, bad=False):
         if self.verbose:
             print(img_metadata)
+            print('is this live?')
         if np_img_list is None:
             return None
         for i in range(len(np_img_list)):
@@ -115,9 +117,9 @@ class PyPatient:
                         print(img_metadata['direction'][i])
                     if img_metadata['direction'][i][0] < 0:
                         np_img_list[i][j] = np.flip(np_img_list[i][j], axis=2)
-                    if img_metadata['direction'][i][4] > 0:
+                    if img_metadata['direction'][i][1] > 0:
                         np_img_list[i][j] = np.flip(np_img_list[i][j], axis=1)
-                    if img_metadata['direction'][i][8] < 0:
+                    if img_metadata['direction'][i][2] > 0:
                         np_img_list[i][j] = np.flip(np_img_list[i][j], axis=0)
 
             else:
@@ -126,12 +128,12 @@ class PyPatient:
                 if img_metadata['direction'][i][0] < 0:
                     np_img_list[i] = np.flip(np_img_list[i], axis=2)
                 if bad:
-                    if img_metadata['direction'][i][4] < 0:
+                    if img_metadata['direction'][i][1] < 0:
                         np_img_list[i] = np.flip(np_img_list[i], axis=1)
                 else:
-                    if img_metadata['direction'][i][4] > 0:
+                    if img_metadata['direction'][i][1] > 0:
                         np_img_list[i] = np.flip(np_img_list[i], axis=1)
-                if img_metadata['direction'][i][8] < 0:
+                if img_metadata['direction'][i][2] > 0:
                     np_img_list[i] = np.flip(np_img_list[i], axis=0)
 
     def orient_overlays(self, np_overlay_list, img_metadata, bad=False):
@@ -149,9 +151,9 @@ class PyPatient:
                         print(img_metadata['direction'][j])
                     if img_metadata['direction'][j][0] < 0:
                         np_overlay_list[i][j] = np.flip(np_overlay_list[i][j], axis=2)
-                    if img_metadata['direction'][j][4] > 0:
+                    if img_metadata['direction'][j][1] > 0:
                         np_overlay_list[i][j] = np.flip(np_overlay_list[i][j], axis=1)
-                    if img_metadata['direction'][j][8] < 0:
+                    if img_metadata['direction'][j][2] > 0:
                         np_overlay_list[i][j] = np.flip(np_overlay_list[i][j], axis=0)
 
             else:
@@ -160,12 +162,11 @@ class PyPatient:
                 if img_metadata['direction'][0][0] < 0:
                     np_overlay_list[i] = np.flip(np_overlay_list[i], axis=2)
                 if bad:
-                    if img_metadata['direction'][0][4] < 0:
+                    if img_metadata['direction'][0][1] < 0:
                         np_overlay_list[i] = np.flip(np_overlay_list[i], axis=1)
-                else:
-                    if img_metadata['direction'][0][4] > 0:
+                    if img_metadata['direction'][0][1] > 0:
                         np_overlay_list[i] = np.flip(np_overlay_list[i], axis=1)
-                if img_metadata['direction'][0][8] < 0:
+                if img_metadata['direction'][0][2] > 0:
                     np_overlay_list[i] = np.flip(np_overlay_list[i], axis=0)
 
     def get_file_type(self, path):
@@ -200,22 +201,28 @@ class PyPatient:
         if img_type is None:
             image = sitk.ReadImage(path)
             direction = image.GetDirection()
+            direction = [direction[0], direction[4], direction[-1]]
+            # direction = (np.asarray(image.GetOrigin()) -
+            #              np.asarray(image.TransformIndexToPhysicalPoint(image.GetSize())))
             origin = image.GetOrigin()
             spacing = image.GetSpacing()
             image = sitk.GetArrayFromImage(image)
             if len(image.shape) == 4:
-                image = image[0:1, :]
+                image = color.rgb2gray(image)
 
         elif img_type == 'nifti':
             reader = sitk.ImageFileReader()
             reader.SetFileName(str(path))
             image = reader.Execute()
             direction = image.GetDirection()
+            direction = [direction[0], direction[4], direction[-1]]
+            # direction = (np.asarray(image.GetOrigin()) -
+            #              np.asarray(image.TransformIndexToPhysicalPoint(image.GetSize())))
             origin = image.GetOrigin()
             spacing = image.GetSpacing()
             image = sitk.GetArrayFromImage(image)
             if len(image.shape) == 4:
-                image = image[0:1, :]
+                image = color.rgb2gray(image)
 
         elif img_type == 'dicom':
             reader = sitk.ImageSeriesReader()
@@ -230,9 +237,14 @@ class PyPatient:
             # reader.LoadPrivateTagsOn()  # Get DICOM Info
             image = reader.Execute()
             direction = image.GetDirection()
+            direction = [direction[0], direction[4], direction[-1]]
+            # direction = (np.asarray(image.GetOrigin()) -
+            #              np.asarray(image.TransformIndexToPhysicalPoint(image.GetSize())))
             origin = image.GetOrigin()
             spacing = image.GetSpacing()
             image = sitk.GetArrayFromImage(image)
+            if len(image.shape) == 4:
+                image = color.rgb2gray(image)
 
         elif img_type == 'png':
             png_list = sorted(list(path.glob('*.png')))
@@ -407,7 +419,7 @@ class PyPatient:
 
         # return n_overlay_labels
 
-    def view(self, plane='axial', three_planes=False, image_size=300, dynamic=True):
+    def view(self, plane='axial', three_planes=False, image_size=300, dynamic=True, cmap='gray'):
         # imopts = {'tools': ['hover'], 'width': 400, 'height': 400, 'cmap': 'gray'}
         # imopts = {'tools': ['hover'], 'cmap': 'gray'}
         opts.defaults(
@@ -419,7 +431,7 @@ class PyPatient:
             #            yaxis=None, shared_axes=False),
             # opts.Overlay(tools=['hover']),
             # opts.NdOverlay(tools=['hover']),
-            opts.Image(cmap='gray', xaxis=None,
+            opts.Image(cmap=cmap, xaxis=None,
                        yaxis=None, shared_axes=False),
         )
 
@@ -441,11 +453,11 @@ class PyPatient:
             pane_height = self.sagittal_height
 
         contrast_start_min = np.asscalar(self.ds.isel(subject_id=0,
-                                                      label=0).image.quantile(0.01).values)
+                                                      label=0).image.quantile(0.01).values)-1e-6
         contrast_start_max = np.asscalar(self.ds.isel(subject_id=0,
-                                                      label=0).image.quantile(0.99).values)
-        contrast_min = np.asscalar(self.ds.isel(subject_id=0, label=0).image.min().values)
-        contrast_max = np.asscalar(self.ds.isel(subject_id=0, label=0).image.max().values)
+                                                      label=0).image.quantile(0.99).values)+1e-6
+        contrast_min = np.asscalar(self.ds.isel(subject_id=0).image.min().values)
+        contrast_max = np.asscalar(self.ds.isel(subject_id=0).image.max().values)
         ctotal = contrast_max - contrast_min
         contrast_min -= ctotal*0.1
         contrast_max += ctotal*0.1
@@ -653,7 +665,7 @@ class PyPatient:
                 # squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
                 gridspace = hv.GridSpace(kdims=['plane', 'label'])
-                for mod in self.label:
+                for mod in self.ds.label.values:
                     gridspace['axial', mod] = hv_ds.select(label=mod).to(
                         hv.Image, ['x', 'y'], groupby=['subject_id', 'z'], vdims='image',
                         dynamic=dynamic).opts(frame_width=self.axial_width,
@@ -675,7 +687,7 @@ class PyPatient:
                 # squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['label'], label=f'{self.subject_id}')
                 gridspace = hv.GridSpace(kdims=['label'])
-                for mod in self.label:
+                for mod in self.ds.label.values:
                     gridspace[mod] = hv_ds.select(label=mod).to(
                         hv.Image, [a1, a2], groupby=['subject_id', a3], vdims='image',
                         dynamic=dynamic).opts(frame_width=pane_width, frame_height=pane_height,
