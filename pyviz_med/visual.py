@@ -13,6 +13,9 @@ from holoviews import opts
 from holoviews.operation.datashader import datashade, shade, dynspread, rasterize
 from bokeh.models import FuncTickFormatter
 from skimage import color
+from skimage.restoration import inpaint
+from skimage.morphology import binary_dilation
+
 
 # hv.extension('bokeh')
 
@@ -208,7 +211,21 @@ class PyPatient:
             spacing = image.GetSpacing()
             image = sitk.GetArrayFromImage(image)
             if len(image.shape) == 4:
-                image = color.rgb2gray(image)
+                # image = color.rgb2gray(image)
+                # custom RGB converter for wave images
+                img_r = np.squeeze(image[:, :, :, 0]).astype(float)
+                img_g = np.squeeze(image[:, :, :, 1]).astype(float)
+                img_b = np.squeeze(image[:, :, :, 2]).astype(float)
+                img_gr = np.where(img_r == 0, 0, img_g)
+                img_gb = np.where(img_b == 0, 0, img_g)
+                img_gg = np.where((img_b == 255) & (img_r == 255) & (img_g == 255), 1, 0)
+                image = 0.001*(img_r+img_gr)  - 0.001*(img_b+img_gb) + img_gg
+
+                # array = np.ma.masked_where(image == 1, image)
+                # for i in range(image.shape[0]):
+                #     array[i].mask = binary_dilation(array[i].mask)
+                #     array[i].mask = binary_dilation(array[i].mask)
+                #     image[i] = inpaint.inpaint_biharmonic(image[i], array[i].mask)
 
         elif img_type == 'nifti':
             reader = sitk.ImageFileReader()
@@ -339,9 +356,10 @@ class PyPatient:
         max_z = max_y = max_x = 0
 
         for img in img_list:
-            max_z = max(img.shape[-3], max_z)
-            max_y = max(img.shape[-2], max_y)
-            max_x = max(img.shape[-1], max_x)
+            max_z = max(img.shape[0], max_z)
+            max_y = max(img.shape[1], max_y)
+            max_x = max(img.shape[2], max_x)
+            print(img.shape)
         if overlay_list is not None:
             n_overlay_labels = self.get_n_overlay_labels(overlay_list)
             if self.verbose:
@@ -350,21 +368,28 @@ class PyPatient:
             for img in overlay_list:
                 if type(img) is list:
                     for subimg in img:
-                        max_z = max(subimg.shape[-3], max_z)
-                        max_y = max(subimg.shape[-2], max_y)
-                        max_x = max(subimg.shape[-1], max_x)
+                        max_z = max(subimg.shape[0], max_z)
+                        max_y = max(subimg.shape[1], max_y)
+                        max_x = max(subimg.shape[2], max_x)
                 else:
                     if self.verbose:
                         print('img.shape', img.shape)
-                    max_z = max(img.shape[-3], max_z)
-                    max_y = max(img.shape[-2], max_y)
-                    max_x = max(img.shape[-1], max_x)
+                    max_z = max(img.shape[0], max_z)
+                    max_y = max(img.shape[1], max_y)
+                    max_x = max(img.shape[2], max_x)
+
         pad = np.zeros((max_z, max_y, max_x))
+        pad_rgb = np.zeros((max_z, max_y, max_x, 3))
 
         for i, img in enumerate(img_list):
-            pad_copy = pad.copy()
-            pad_copy[:img.shape[0], :img.shape[1], :img.shape[2]] = img
-            img_list[i] = pad_copy
+            if len(img.shape) == 3:
+                pad_copy = pad.copy()
+                pad_copy[:img.shape[0], :img.shape[1], :img.shape[2]] = img
+                img_list[i] = pad_copy
+            elif len(img.shape) == 4:
+                pad_copy = pad_rgb.copy()
+                pad_copy[:img.shape[0], :img.shape[1], :img.shape[2], :img.shape[3]] = img
+                img_list[i] = pad_copy
 
         img_list = np.stack(img_list, axis=0)
 
