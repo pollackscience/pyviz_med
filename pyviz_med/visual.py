@@ -460,22 +460,33 @@ class PyPatient:
                        yaxis=None, shared_axes=False),
         )
 
+        self.is2d = False
+        if 'z' not in self.ds.dims:
+            self.is2d = True
+
         self.set_size(image_size)
-        if plane == 'axial':
-            a1, a2, a3 = 'x', 'y', 'z'
-            # invert = True
-            pane_width = self.axial_width
-            pane_height = self.axial_height
-        elif plane == 'coronal':
-            a1, a2, a3 = 'x', 'z', 'y'
-            pane_width = self.coronal_width
-            pane_height = self.coronal_height
-            # invert = False
-        elif plane == 'sagittal':
-            a1, a2, a3 = 'y', 'z', 'x'
-            # invert = False
-            pane_width = self.sagittal_width
-            pane_height = self.sagittal_height
+
+        if self.is2d:
+            plane == '2d'
+            a1, a2 = 'x', 'y'
+            pane_width = self.pane_width
+            pane_height = self.pane_height
+        else:
+            if plane == 'axial':
+                a1, a2, a3 = 'x', 'y', 'z'
+                # invert = True
+                pane_width = self.axial_width
+                pane_height = self.axial_height
+            elif plane == 'coronal':
+                a1, a2, a3 = 'x', 'z', 'y'
+                pane_width = self.coronal_width
+                pane_height = self.coronal_height
+                # invert = False
+            elif plane == 'sagittal':
+                a1, a2, a3 = 'y', 'z', 'x'
+                # invert = False
+                pane_width = self.sagittal_width
+                pane_height = self.sagittal_height
 
         contrast_start_min = np.asscalar(self.ds.isel(subject_id=0,
                                                       label=0).image.quantile(0.01).values)-1e-6
@@ -506,10 +517,16 @@ class PyPatient:
             # hover = HoverTool(tooltips=tooltips)
             if self.verbose:
                 print('overlay_max_calc')
-            first_subj_max = self.ds.isel(subject_id=0).overlay.max(dim=['x', 'y', 'z',
-                                                                         'label']).compute()
-            first_subj_min = self.ds.isel(subject_id=0).overlay.min(dim=['x', 'y', 'z',
-                                                                         'label']).compute()
+            if self.is2d:
+                first_subj_max = self.ds.isel(subject_id=0).overlay.max(dim=['x', 'y',
+                                                                             'label']).compute()
+                first_subj_min = self.ds.isel(subject_id=0).overlay.min(dim=['x', 'y',
+                                                                             'label']).compute()
+            else:
+                first_subj_max = self.ds.isel(subject_id=0).overlay.max(dim=['x', 'y', 'z',
+                                                                             'label']).compute()
+                first_subj_min = self.ds.isel(subject_id=0).overlay.min(dim=['x', 'y', 'z',
+                                                                             'label']).compute()
             if self.verbose:
                 print('overlay_max_calc ready')
                 print(first_subj_max)
@@ -590,7 +607,28 @@ class PyPatient:
             # subj_viewer = SubjectViewer(ds=self.ds,
             #                             subject_id_sel=list(self.ds.subject_id.values))
 
-            if three_planes:
+            if self.is2d:
+                gridspace = hv_ds_image.to(
+                    hv.Image, [a1, a2], vdims=['image', 'overlay'],
+                    dynamic=dynamic).opts(frame_width=pane_width, frame_height=pane_height,
+                                          tools=['hover'],
+                                          ).apply.opts(clim=cslider.param.value)
+                if self.verbose:
+                    print(gridspace)
+                gridspace *= hv_ds_overlay.to(
+                    hv.Image, [a1, a2], vdims='overlay',
+                    dynamic=dynamic
+                ).opts(
+                    cmap='glasbey_hv', clipping_colors={'min': 'transparent',
+                                                        'NaN': 'transparent'},
+                ).redim.range(overlay=(1e-6, overlay_max)).apply.opts(
+                    alpha=alpha_slider.param.value, cmap=cmap_dict, clim=oclim)
+                # print(gridspace)
+                # print(gridspace)
+                # gridspace = hv.DynamicMap(subj_viewer.load_subject).grid('label')
+                gridspace = gridspace.layout('label')
+
+            elif three_planes:
                 # squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
                 gridspace = hv.GridSpace(kdims=['plane', 'label'])
@@ -686,7 +724,15 @@ class PyPatient:
             hover = HoverTool(tooltips=tooltips)
             hv_ds = hv.Dataset(self.ds['image'])
             print(hv_ds)
-            if three_planes:
+            if self.is2d:
+                gridspace = hv.GridSpace(kdims=['label'])
+                for mod in self.ds.label.values:
+                    gridspace[mod] = hv_ds.select(label=mod).to(
+                        hv.Image, [a1, a2], groupby=['subject_id'], vdims='image',
+                        dynamic=dynamic).opts(frame_width=pane_width, frame_height=pane_height,
+                                              shared_axes=False, tools=[hover],
+                                              ).apply.opts(clim=cslider.param.value)
+            elif three_planes:
                 # squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
                 gridspace = hv.GridSpace(kdims=['plane', 'label'])
@@ -735,19 +781,24 @@ class PyPatient:
         init_spacing = self.ds.spacing.isel(subject_id=0, label=0).values
         x_spacing = init_spacing[0]
         y_spacing = init_spacing[1]
-        z_spacing = init_spacing[2]
+        if self.is2d:
+            self.pane_width = int(size)
+            pane_scale = self.pane_width/(len(self.ds.x)*x_spacing)
+            self.pane_height = int(y_spacing*len(self.ds.y)*pane_scale)
+        else:
+            z_spacing = init_spacing[2]
 
-        self.axial_width = int(size)
-        axial_scale = self.axial_width/(len(self.ds.x)*x_spacing)
-        self.axial_height = int(y_spacing*len(self.ds.y)*axial_scale)
+            self.axial_width = int(size)
+            axial_scale = self.axial_width/(len(self.ds.x)*x_spacing)
+            self.axial_height = int(y_spacing*len(self.ds.y)*axial_scale)
 
-        self.coronal_width = int(size)
-        coronal_scale = self.coronal_width/(len(self.ds.x)*x_spacing)
-        self.coronal_height = int(z_spacing*len(self.ds.z)*coronal_scale)
+            self.coronal_width = int(size)
+            coronal_scale = self.coronal_width/(len(self.ds.x)*x_spacing)
+            self.coronal_height = int(z_spacing*len(self.ds.z)*coronal_scale)
 
-        self.sagittal_width = int(size)
-        sagittal_scale = self.sagittal_width/(len(self.ds.y)*y_spacing)
-        self.sagittal_height = int(z_spacing*len(self.ds.z)*sagittal_scale)
+            self.sagittal_width = int(size)
+            sagittal_scale = self.sagittal_width/(len(self.ds.y)*y_spacing)
+            self.sagittal_height = int(z_spacing*len(self.ds.z)*sagittal_scale)
 
 
 class PyCohort(PyPatient):
