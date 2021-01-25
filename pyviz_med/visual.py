@@ -723,15 +723,15 @@ class PyPatient:
             ]
             hover = HoverTool(tooltips=tooltips)
             hv_ds = hv.Dataset(self.ds['image'])
-            print(hv_ds)
             if self.is2d:
                 gridspace = hv.GridSpace(kdims=['label'])
                 for mod in self.ds.label.values:
                     gridspace[mod] = hv_ds.select(label=mod).to(
                         hv.Image, [a1, a2], groupby=['subject_id'], vdims='image',
                         dynamic=dynamic).opts(frame_width=pane_width, frame_height=pane_height,
-                                              shared_axes=False, tools=[hover],
-                                              ).apply.opts(clim=cslider.param.value)
+                                              shared_axes=False, tools=[hover], axiswise=True,
+                                              # ).apply.opts(clim=cslider.param.value)
+                                              )
             elif three_planes:
                 # squish_height = int(max(image_size*(len(self.ds.z)/len(self.ds.x)), image_size/2))
                 # gridspace = hv.GridSpace(kdims=['plane', 'label'], label=f'{self.subject_id}')
@@ -767,7 +767,7 @@ class PyPatient:
 
         pn_layout = pn.pane.HoloViews(gridspace)
         wb = pn_layout.widget_box
-        wb.append(cslider)
+        # wb.append(cslider)
         if 'overlay' in self.ds.data_vars:
             wb.append(alpha_slider)
             wb.append(cmap_select)
