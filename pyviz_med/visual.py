@@ -489,9 +489,9 @@ class PyPatient:
                 pane_height = self.sagittal_height
 
         contrast_start_min = np.asscalar(self.ds.isel(subject_id=0,
-                                                      label=0).image.quantile(0.01).values)-1e-6
+                                                      ).image.quantile(0.01).values)-1e-6
         contrast_start_max = np.asscalar(self.ds.isel(subject_id=0,
-                                                      label=0).image.quantile(0.99).values)+1e-6
+                                                      ).image.quantile(0.99).values)+1e-6
         contrast_min = np.asscalar(self.ds.isel(subject_id=0).image.min().values)
         contrast_max = np.asscalar(self.ds.isel(subject_id=0).image.max().values)
         ctotal = contrast_max - contrast_min
@@ -767,7 +767,7 @@ class PyPatient:
 
         pn_layout = pn.pane.HoloViews(gridspace)
         wb = pn_layout.widget_box
-        # wb.append(cslider)
+        wb.append(cslider)
         if 'overlay' in self.ds.data_vars:
             wb.append(alpha_slider)
             wb.append(cmap_select)
